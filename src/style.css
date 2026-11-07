@@ -269,3 +269,28 @@ li.done .rname span { text-decoration: line-through; color: var(--muted); }
 .auth input.code { letter-spacing: .3em; font-variant-numeric: tabular-nums; text-align: center; font-size: 22px; }
 .auth .err { color: var(--empty); font-size: 14px; }
 .linkbtn { border: 0; background: none; color: var(--accent); font-weight: 600; padding: 6px 0; align-self: flex-start; }
+
+/* Tur: hjemme / på hytta */
+.trip { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+.trip.hytta { background: var(--accent-soft); border-color: transparent; }
+.trip-head { display: flex; align-items: center; gap: 10px; }
+.trip-head b { font-family: var(--f-display); font-size: 19px; display: block; }
+.trip-head small { color: var(--muted); font-size: 13px; }
+.mode-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--muted); flex: none; }
+.trip.hytta .mode-dot { background: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent); }
+.tripdate { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-weight: 600; font-size: 14px; }
+.tripdate input { height: 40px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font: inherit; font-weight: 500; }
+.trip .risk-title { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--empty); margin-bottom: -4px; }
+.trip .soon { font-size: 14px; color: var(--muted); margin: 0; }
+.trip .soon b { color: var(--low); font-weight: 600; }
+.choices { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.choices .btn { height: 52px; }
+.seg.small label { height: 32px; padding: 0 10px; font-size: 13px; }
+.dplist { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.dplist li { background: var(--bg); border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.dplist li > div:first-child { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.dplist li span { font-weight: 600; overflow-wrap: anywhere; }
+.dplist li small { color: var(--muted); font-size: 13px; white-space: nowrap; }
+.exp-soon { color: var(--low); font-weight: 600; }
+.exp-gone { color: var(--empty); font-weight: 600; }
+.banner.go { background: var(--accent-soft); }

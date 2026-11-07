@@ -16,11 +16,18 @@ const MAPS = {
       id: r.id, name: r.name, place: r.place, category: r.category, store: r.store, always: r.always,
       status: r.status, qty: r.qty, frozen: r.frozen, prevStatus: r.prev_status, prevQty: r.prev_qty,
       boughtAt: ms(r.bought_at), updatedBy: r.updated_by, updatedAt: ms(r.updated_at),
+      shelfDays: r.shelf_days ?? null, expiresOn: r.expires_on ?? null,
+      stockedAt: ms(r.stocked_at), createdAt: ms(r.created_at),
     }),
     cols: {
       id: "id", name: "name", place: "place", category: "category", store: "store", always: "always", status: "status",
       qty: "qty", frozen: "frozen", prevStatus: "prev_status", prevQty: "prev_qty", boughtAt: ["bought_at", iso],
+      shelfDays: "shelf_days", expiresOn: "expires_on", stockedAt: ["stocked_at", iso],
     },
+  },
+  trip_state: {
+    from: r => ({ id: r.id, mode: r.mode, changedAt: ms(r.changed_at), changedBy: r.changed_by, nextTrip: r.next_trip }),
+    cols: { mode: "mode", nextTrip: "next_trip" },
   },
   extras: {
     from: r => ({
@@ -124,6 +131,12 @@ function crud(table) {
 export const items = crud("items");
 export const extras = crud("extras");
 export const stores = crud("stores");
+
+// Turstatus: én rad med id 'main'.
+export async function setTrip(patch) {
+  store.upsertLocal("trip_state", { id: "main", ...patch, changedAt: Date.now() });
+  await run("trip_state", sb.from("trip_state").update(toRow("trip_state", patch)).eq("id", "main"));
+}
 
 export async function markChecked(place, userId) {
   store.upsertLocal("place_checks", { id: place, place, at: Date.now(), by: userId });

@@ -35,6 +35,7 @@ const Result = z.object({
       staple: z.boolean(),
       level: z.enum(LEVELS),
       count: z.number().int(),
+      shelf_days: z.number().int().nullable(),
     }),
   ),
 });
@@ -59,7 +60,7 @@ For HVER registrerte vare, avgjør:
 - "level": "ok", "lite" eller "tomt" når seen er "ja", ellers null. Bruk "lite" bare når det tydelig er lite igjen (nesten tom flaske eller pose, siste pakke).
 Velg heller "usikker" enn "nei" når du er i tvil. Et feil "nei" fører til at vi kjøper noe vi allerede har.
 
-List også varer du ser tydelig som IKKE står i listen over ("new"). Bruk korte norske navn slik folk skriver dem på en handleliste (for eksempel "Kaffe", "Hvetemel", "Leverpostei"), ikke merkenavn. Slå sammen like varer. For hver ny vare: "category", "staple" (true hvis det er en basisvare man vanligvis alltid vil ha på hytta, som kaffe, salt, olje eller dopapir), "level", og "count" (antall pakker; 1 hvis du ikke kan telle).`;
+List også varer du ser tydelig som IKKE står i listen over ("new"). Bruk korte norske navn slik folk skriver dem på en handleliste (for eksempel "Kaffe", "Hvetemel", "Leverpostei"), ikke merkenavn. Slå sammen like varer. For hver ny vare: "category", "staple" (true hvis det er en basisvare man vanligvis alltid vil ha på hytta, som kaffe, salt, olje eller dopapir), "level", "count" (antall pakker; 1 hvis du ikke kan telle), og "shelf_days": omtrent hvor mange dager varen holder seg der den står etter at den er kjøpt eller åpnet (for eksempel melk 7, brød 4, smør 60, ketchup 180). Bruk null for varer som holder seg i mange måneder, som tørrvarer, hermetikk, husholdningsartikler og alt i fryseren.`;
 }
 
 async function isMember(token: string): Promise<boolean> {

@@ -5,6 +5,7 @@ Matlager og handleliste for hytta på Bortelid. Mobilapp (PWA) på Vercel med Su
 - **Handleliste:** Det som er lite eller tomt havner her av seg selv, delt på Kristiansand og Bortelid.
 - **Lager:** Kjøleskap, fryser, tørrskap og husholdning med status Nok, Lite eller Tomt. Fryseren har antall og frysedato.
 - **Avreisesjekk:** Ta bilder av et skap. Claude sammenligner bildene med lageret og foreslår endringer du godkjenner.
+- **Hjemme / på hytta:** «Vi drar» spør når dere kommer tilbake og hjelper dere med ferskvarer som ikke holder til da. Hjemme viser appen hva som trolig har gått ut før neste tur. «Vi er på hytta» lar dere kaste det som er gått ut.
 
 ## Oppsett (én gang)
 
@@ -13,6 +14,7 @@ Matlager og handleliste for hytta på Bortelid. Mobilapp (PWA) på Vercel med Su
 1. Lag et nytt prosjekt på [supabase.com](https://supabase.com). Velg regionen **Stockholm (eu-north-1)**.
 2. Åpne **SQL Editor → New query** og lim inn hele [supabase/schema.sql](supabase/schema.sql).
    Bytt ut de to e-postadressene nederst med din og Christinas før du trykker **Run**.
+   Kjør deretter [supabase/002_turer.sql](supabase/002_turer.sql) på samme måte.
 3. Gå til **Authentication → Emails → Magic Link** og legg til koden i e-posten, for eksempel:
    ```
    <h2>Kode til Hyttelageret</h2>

@@ -28,10 +28,18 @@ const STARTER = {
   hus: [["Dopapir", "hus"], ["Tørkerull", "hus"], ["Oppvaskmiddel", "hus"], ["Søppelposer", "hus"], ["Matpapir", "hus"], ["Aluminiumsfolie", "hus"], ["Fyrstikker", "hus"], ["Tennbriketter", "hus"], ["Stearinlys", "hus"], ["Batterier", "hus"]],
 };
 
+// Holdbarhet i dager etter kjøp/åpning, når ingenting annet er satt. null = holder seg lenge.
+const SHELF_DEFAULT = { frukt: 7, brod: 4, meieri: 10, palegg: 21, kjott: 3, krydder: 90, drikke: 30, snacks: 60, annet: 14 };
+const STARTER_SHELF = { "Smør": 60, "Egg": 28, "Brunost": 60, "Syltetøy": 90, "Majones": 60, "Ketchup": 180, "Sennep": 180 };
+const SHELF_OPTIONS = [["", "Automatisk"], ["3", "3 dager"], ["7", "1 uke"], ["14", "2 uker"], ["30", "1 måned"], ["90", "3 måneder"], ["365", "Holder lenge"]];
+const UNKNOWN_RETURN_DAYS = 14;
+const DAY = 864e5;
+
 // ---------- Tilstand ----------
 const S = {
   user: null, uid: null,
   items: new Map(), extras: new Map(), people: {}, stores: DEFAULT_STORES, checks: {},
+  trip: { mode: "hjemme", nextTrip: null, changedAt: null }, justDeparted: false,
   status: "loading", slow: false, started: false, askedName: false,
   tab: "liste", place: "torr", addStore: "krs",
 };
@@ -73,6 +81,38 @@ function monthsOld(ym) {
   return (n.getFullYear() - y) * 12 + (n.getMonth() + 1 - m);
 }
 function thisMonth() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; }
+function isoDay(ts) { const d = new Date(ts); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
+const endOfDay = day => Date.parse(day + "T23:59:59");
+const fmtDay = ts => new Date(ts).toLocaleDateString("nb-NO", { weekday: "short", day: "numeric", month: "short" }).replace(/\.$/, "");
+
+// Holdbarhet
+function shelfDays(i) {
+  if (i.place === "frys" || i.place === "hus") return null;
+  if (i.shelfDays) return i.shelfDays;
+  // Uten eget anslag regnes bare kjøleskapet og frukt som ferskvarer (knekkebrød i tørrskapet holder seg).
+  if (i.place === "kjol" || i.category === "frukt") return SHELF_DEFAULT[i.category] ?? 14;
+  return null;
+}
+function expiresAt(i) {
+  if (i.expiresOn) return endOfDay(i.expiresOn);
+  const d = shelfDays(i);
+  if (!d || d >= 365) return null;
+  const base = i.stockedAt || i.boughtAt || i.createdAt;
+  return base ? base + d * DAY : null;
+}
+// Varer som ikke er tomme og går ut før et gitt tidspunkt
+const riskList = until => [...S.items.values()]
+  .filter(i => i.status !== "tomt" && (expiresAt(i) ?? Infinity) < until)
+  .sort((a, b) => expiresAt(a) - expiresAt(b));
+function expiryText(i) {
+  const e = expiresAt(i); if (!e) return "";
+  const days = Math.floor((e - Date.now()) / DAY);
+  if (days < 0) return `<span class="exp-gone">Trolig gått ut</span>`;
+  if (days === 0) return `<span class="exp-soon">Går ut i dag</span>`;
+  if (days === 1) return `<span class="exp-soon">Går ut i morgen</span>`;
+  if (days <= 3) return `<span class="exp-soon">Går ut om ${days} dager</span>`;
+  return "";
+}
 
 let toastT;
 function toast(msg) {
@@ -96,6 +136,7 @@ function itemAdd(data) {
   const body = {
     name: data.name, place: data.place, category: data.category || PLACE[data.place].cat,
     store: validStore(data.store), always: !!data.always, status: data.status || "ok", ...by(),
+    shelfDays: data.shelfDays || null, expiresOn: data.expiresOn || null, stockedAt: Date.now(),
   };
   if (data.place === "frys") { body.qty = Number.isFinite(data.qty) ? data.qty : 1; body.frozen = data.frozen || thisMonth(); }
   return save(() => backend.items.add(body));
@@ -139,9 +180,37 @@ function renderActivity() {
   if (S.status === "loading") { el.textContent = S.slow ? "Får ikke kontakt med lageret ennå" : "Henter lageret …"; return; }
   let last = null;
   for (const d of [...S.items.values(), ...S.extras.values()]) if (d.updatedAt && (!last || d.updatedAt > last.updatedAt)) last = d;
-  if (!last) { el.textContent = "Ingen endringer ennå"; return; }
+  const mode = S.trip.mode === "hytta" ? "På hytta" : "Hjemme";
+  if (!last) { el.textContent = `${mode} · ingen endringer ennå`; return; }
   const who = personName(last.updatedBy);
-  el.textContent = `Sist endret ${when(last.updatedAt)}${who ? " av " + who : ""}`;
+  el.textContent = `${mode} · sist endret ${when(last.updatedAt)}${who ? " av " + who : ""}`;
+}
+
+function renderTrip() {
+  const out = $("#tripOut");
+  if (S.status === "loading") { out.innerHTML = ""; return; }
+  const t = S.trip, since = t.changedAt ? fmtDay(t.changedAt) : "";
+  if (t.mode === "hytta") {
+    const soon = riskList(Date.now() + 2 * DAY);
+    out.innerHTML = `<div class="trip hytta">
+      <div class="trip-head"><span class="mode-dot"></span><div><b>På hytta</b><small>${esc(since ? "Kom fram " + since : "")}</small></div></div>
+      ${soon.length ? `<p class="soon">Bruk snart: ${soon.slice(0, 5).map(i => `<b>${esc(i.name)}</b>`).join(", ")}${soon.length > 5 ? ` og ${soon.length - 5} til` : ""}</p>` : ""}
+      <button class="btn primary block" type="button" data-act="depart">Vi drar</button>
+    </div>`;
+    return;
+  }
+  const until = t.nextTrip ? endOfDay(t.nextTrip) : Date.now();
+  const risk = riskList(until);
+  out.innerHTML = `<div class="trip">
+    <div class="trip-head"><span class="mode-dot"></span><div><b>Hjemme</b><small>${esc(since ? "Dro fra hytta " + since : "")}</small></div></div>
+    <label class="tripdate">Neste tur<input type="date" id="nextTrip" value="${esc(t.nextTrip || "")}" min="${isoDay(Date.now())}"></label>
+    ${risk.length ? `<div class="risk-title">${t.nextTrip ? "Har trolig gått ut før turen" : "Har trolig gått ut"}</div>
+      <ul class="rows">${risk.map(i => `<li>
+        <div class="rname"><span>${esc(i.name)}</span><small>${esc(PLACE[i.place]?.name || "")} · holdt til ca. ${esc(fmtDay(expiresAt(i)))}</small></div>
+        <button class="chipbtn" type="button" data-act="renew" data-id="${esc(i.id)}">Kjøp nytt</button>
+      </li>`).join("")}</ul>` : ""}
+    <button class="btn primary block" type="button" data-act="arrive">Vi er på hytta</button>
+  </div>`;
 }
 
 function renderBanner() {
@@ -179,6 +248,7 @@ function shopRow(r) {
 }
 
 function renderListe() {
+  renderTrip();
   const out = $("#listOut");
   if (S.status === "loading") { out.innerHTML = ""; return; }
   const rows = shopping();
@@ -234,6 +304,7 @@ function renderLager() {
       if (i.always) sub.push('<span class="fast">Fast</span>');
       if (isFrys && i.frozen) sub.push(`<span class="${age ? "age" : ""}">Frosset ${esc(monthLabel(i.frozen))}</span>`);
       else sub.push(esc(storeName(validStore(i.store))));
+      const exp = expiryText(i); if (exp) sub.push(exp);
       return `<li>
         <button class="pill ${i.status}" type="button" data-act="cycle" data-id="${esc(i.id)}" aria-label="${esc(i.name)}: ${STATUS[i.status]}. Trykk for å endre">${STATUS[i.status] || "?"}</button>
         <button class="rname tap" type="button" data-act="edit" data-id="${esc(i.id)}"><span>${esc(i.name)}</span><small>${sub.join(" · ")}</small></button>
@@ -250,7 +321,11 @@ function renderLager() {
 function renderSjekk() {
   const out = $("#sjekkOut");
   if (S.status === "loading") { out.innerHTML = ""; return; }
-  out.innerHTML = `<div class="pcards">` + PLACES.map(p => {
+  let top = "";
+  if (S.justDeparted) top = `<div class="banner go"><b>Siste steg før dere går:</b> ta bilder av skapene, så er handlelisten klar til neste tur.</div>`;
+  else if (S.trip.mode === "hytta") top = `<button class="btn primary block" type="button" data-act="depart">Vi drar – start avreisen</button>`;
+  else top = `<div class="banner">Dere er hjemme. Bildesjekken brukes vanligvis når dere drar fra hytta, men du kan bruke den når som helst.</div>`;
+  out.innerHTML = top + `<div class="pcards" style="margin-top:12px">` + PLACES.map(p => {
     const list = itemsIn(p.id), bad = list.filter(needs).length;
     const lc = S.checks[p.id];
     const who = lc ? personName(lc.by) : "";
@@ -300,6 +375,10 @@ function openEdit(id) {
         <label class="field">Antall<input id="f-qty" type="number" inputmode="numeric" min="0" value="${Number(v.qty) || 0}"></label>
         <label class="field">Frosset<input id="f-frozen" type="month" value="${esc(v.frozen || thisMonth())}"></label>
       </div>
+      <div class="row2" id="shelfFields" ${v.place === "frys" || v.place === "hus" ? "hidden" : ""}>
+        <label class="field">Holder seg<select id="f-shelf">${SHELF_OPTIONS.map(([k, l]) => `<option value="${k}" ${String(v.shelfDays || "") === k ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+        <label class="field">Best før<input id="f-exp" type="date" value="${esc(v.expiresOn || "")}"></label>
+      </div>
       <label class="toggle"><input type="checkbox" id="f-fast" ${v.always ? "checked" : ""}><span>Fast vare<small>Skal alltid være på hytta. Bildesjekken setter den til Tomt i stedet for å fjerne den.</small></span></label>
       <div class="foot">
         ${it ? `<button type="button" class="btn danger" id="f-del">Slett</button>` : `<button type="button" class="btn ghost" id="f-cancel">Avbryt</button>`}
@@ -310,6 +389,7 @@ function openEdit(id) {
   form.addEventListener("change", e => {
     if (e.target.name === "f-place") {
       $("#frysFields").hidden = e.target.value !== "frys";
+      $("#shelfFields").hidden = e.target.value === "frys" || e.target.value === "hus";
       if (!it) $("#f-cat").value = PLACE[e.target.value].cat;
     }
   });
@@ -325,6 +405,11 @@ function openEdit(id) {
     const place = form.querySelector('input[name="f-place"]:checked').value;
     const status = form.querySelector('input[name="f-status"]:checked').value;
     const data = { name, place, status, store: $("#f-store").value, category: $("#f-cat").value, always: $("#f-fast").checked };
+    if (place !== "frys" && place !== "hus") {
+      data.shelfDays = parseInt($("#f-shelf").value, 10) || null;
+      data.expiresOn = $("#f-exp").value || null;
+    }
+    if (it && status === "ok" && it.status !== "ok") data.stockedAt = Date.now();
     if (place === "frys") { data.qty = Math.max(0, parseInt($("#f-qty").value, 10) || 0); data.frozen = $("#f-frozen").value || thisMonth(); }
     closeSheet();
     if (it) { if (await itemUpdate(id, data)) toast("Lagret"); }
@@ -350,7 +435,7 @@ function openStarter() {
   $("#st-add").addEventListener("click", async () => {
     const picks = [...document.querySelectorAll(".starter input:checked")].map(i => ({ name: i.dataset.name, place: i.dataset.place, category: i.dataset.cat }));
     closeSheet();
-    const res = await Promise.all(picks.map(p => itemAdd({ ...p, store: stores()[0].id, always: true, status: "ok", qty: 1 })));
+    const res = await Promise.all(picks.map(p => itemAdd({ ...p, store: stores()[0].id, always: true, status: "ok", qty: 1, shelfDays: p.place === "kjol" ? STARTER_SHELF[p.name] : null })));
     toast(`${res.filter(Boolean).length} varer lagt inn`);
     go("lager");
   });
@@ -374,7 +459,6 @@ function openSettings(first) {
       <button class="btn ${nm === "Jonas" ? "primary" : ""}" type="button" data-who="Jonas">Jonas</button>
       <button class="btn ${nm === "Christina" ? "primary" : ""}" type="button" data-who="Christina">Christina</button>
     </div>
-    <form id="whoForm" class="addbar"><label class="sr" for="whoName">Annet navn</label><input id="whoName" placeholder="Annet navn" maxlength="40"><button class="btn" type="submit">Bruk</button></form>
     ${first ? "" : `<h3 style="font-size:17px;margin-top:6px">Butikker</h3>
     <ul class="storelist">${stores().map(s => {
       const used = [...S.items.values()].filter(i => validStore(i.store) === s.id).length + [...S.extras.values()].filter(x => validStore(x.store) === s.id).length;
@@ -389,7 +473,6 @@ function openSettings(first) {
     const r = e.target.closest("[data-rmstore]");
     if (r) { closeSheet(); if (await save(() => backend.stores.remove(r.dataset.rmstore))) toast("Butikken er fjernet"); }
   });
-  $("#whoForm").addEventListener("submit", async e => { e.preventDefault(); const n = $("#whoName").value.trim(); if (n) { closeSheet(); await setName(n); } });
   const sf = $("#storeForm");
   if (sf) sf.addEventListener("submit", async e => {
     e.preventDefault(); const n = $("#storeName").value.trim(); if (!n) return;
@@ -402,6 +485,85 @@ function openSettings(first) {
 }
 async function setName(n) {
   if (await save(() => backend.setName(S.uid, n))) render();
+}
+
+// ---------- Vi drar ----------
+function openDepart() {
+  const today = isoDay(Date.now());
+  const quick = [["7", "Om en uke"], ["14", "Om to uker"], ["30", "Om en måned"], ["60", "Lengre"]];
+  openSheet(`<h2>Vi drar</h2><p class="lead">Når kommer dere tilbake? Da ser appen hvilke ferskvarer som ikke holder til da.</p>
+    <div class="choices">${quick.map(([d, l]) => `<button class="btn" type="button" data-days="${d}">${l}</button>`).join("")}</div>
+    <label class="field">Eller velg dato<input type="date" id="dp-date" min="${today}"></label>
+    <div class="foot"><button class="btn ghost" type="button" id="dp-unknown">Vet ikke</button>
+    <button class="btn primary" type="button" id="dp-next" disabled>Neste</button></div>`);
+  const body = $("#sheetBody");
+  body.addEventListener("click", e => {
+    const b = e.target.closest("[data-days]"); if (!b) return;
+    departStep2(isoDay(Date.now() + Number(b.dataset.days) * DAY));
+  });
+  $("#dp-date").addEventListener("change", e => { $("#dp-next").disabled = !e.target.value; });
+  $("#dp-next").addEventListener("click", () => { const v = $("#dp-date").value; if (v) departStep2(v); });
+  $("#dp-unknown").addEventListener("click", () => departStep2(null));
+}
+
+function departStep2(nextTrip) {
+  const until = nextTrip ? endOfDay(nextTrip) : Date.now() + UNKNOWN_RETURN_DAYS * DAY;
+  const list = riskList(until).filter(i => i.place !== "frys");
+  const when = nextTrip ? `til ${fmtDay(endOfDay(nextTrip))}` : `de neste ${UNKNOWN_RETURN_DAYS} dagene`;
+  if (!list.length) {
+    openSheet(`<h2>Alt holder</h2><p class="lead">Ingen ferskvarer går ut ${esc(when)}, så dere kan dra.</p>
+      <div class="foot"><button class="btn ghost" type="button" id="dp-back">Tilbake</button><button class="btn primary" type="button" id="dp-save">Vi drar</button></div>`);
+  } else {
+    openSheet(`<h2>Ferskvarer</h2><p class="lead">Velg hva dere gjør med det som trolig ikke holder ${esc(when)}:</p>
+      <ul class="dplist">${list.map(i => `<li>
+        <div><span>${esc(i.name)}</span><small>holder til ca. ${esc(fmtDay(expiresAt(i)))}</small></div>
+        ${segHtml("dp-" + i.id, [["bort", "Ta med / kast"], ["frys", "Frys"], ["sta", "La stå"]], "bort", "").replace('class="seg"', 'class="seg small"')}
+      </li>`).join("")}</ul>
+      <div class="foot"><button class="btn ghost" type="button" id="dp-back">Tilbake</button><button class="btn primary" type="button" id="dp-save">Lagre og dra</button></div>`);
+  }
+  $("#dp-back").addEventListener("click", openDepart);
+  $("#dp-save").addEventListener("click", async () => {
+    const choices = list.map(i => [i, document.querySelector(`input[name="dp-${i.id}"]:checked`)?.value || "bort"]);
+    closeSheet();
+    const jobs = choices.map(([i, c]) => {
+      if (c === "frys") return itemUpdate(i.id, { place: "frys", qty: Math.max(1, Number(i.qty) || 1), frozen: thisMonth(), expiresOn: null });
+      if (c === "bort") return i.always ? itemUpdate(i.id, { status: "tomt" }) : itemDelete(i.id);
+      return true;
+    });
+    jobs.push(save(() => backend.setTrip({ mode: "hjemme", nextTrip })));
+    await Promise.all(jobs);
+    S.justDeparted = true;
+    go("sjekk");
+    toast("Avreise lagret. God tur hjem!");
+  });
+}
+
+// ---------- Vi er på hytta ----------
+function openArrive() {
+  const list = riskList(Date.now() + DAY).filter(i => i.place !== "frys");
+  openSheet(`<h2>Velkommen til hytta</h2>
+    <p class="lead">${list.length ? "Disse har trolig gått ut mens dere var borte. La haken stå på det dere kaster." : "Ingen ferskvarer å sjekke. God tur!"}</p>
+    ${list.length ? `<ul class="props">${list.map(i => `<li>
+      <input type="checkbox" id="ar-${esc(i.id)}" data-id="${esc(i.id)}" checked>
+      <label class="main" for="ar-${esc(i.id)}"><span>${esc(i.name)}</span><small>Kast · holdt til ca. ${esc(fmtDay(expiresAt(i)))}</small></label>
+    </li>`).join("")}</ul>` : ""}
+    <div class="foot"><button class="btn ghost" type="button" id="ar-cancel">Avbryt</button><button class="btn primary" type="button" id="ar-save">Vi er på hytta</button></div>`);
+  $("#ar-cancel").addEventListener("click", closeSheet);
+  $("#ar-save").addEventListener("click", async () => {
+    const boxes = [...document.querySelectorAll('#sheetBody input[data-id]')];
+    closeSheet();
+    const recheck = isoDay(Date.now() + 3 * DAY);
+    const jobs = boxes.map(b => {
+      const i = S.items.get(b.dataset.id); if (!i) return true;
+      if (!b.checked) return itemUpdate(i.id, { expiresOn: recheck }); // fortsatt bra: sjekk igjen om tre dager
+      return i.always ? itemUpdate(i.id, { status: "tomt" }) : itemDelete(i.id);
+    });
+    jobs.push(save(() => backend.setTrip({ mode: "hytta", nextTrip: null })));
+    await Promise.all(jobs);
+    S.justDeparted = false;
+    go("liste");
+    toast("Velkommen til hytta!");
+  });
 }
 
 // ---------- Bildesjekk ----------
@@ -540,6 +702,7 @@ function buildProposals(place, res) {
     const cat = CAT[n.category] ? n.category : PLACE[place].cat;
     out.push({ group: "new", type: "add", on: true, name, title: name, category: cat,
       always: !!n.staple, status: lvl, qty: Math.max(1, parseInt(n.count, 10) || 1),
+      shelfDays: Number.isInteger(n.shelf_days) && n.shelf_days > 0 && n.shelf_days < 3650 ? n.shelf_days : null,
       sub: `${CAT[cat]}${lvl !== "ok" ? " · " + STATUS[lvl] : ""}` });
   }
   return out;
@@ -575,9 +738,13 @@ function renderReview() {
     const place = photo.place, chosen = props.filter(x => x.on);
     closeSheet();
     const jobs = chosen.map(x => {
-      if (x.type === "status") return itemUpdate(x.id, { status: x.to, ...(x.to === "tomt" && S.items.get(x.id)?.place === "frys" ? { qty: 0 } : {}) });
+      if (x.type === "status") return itemUpdate(x.id, {
+        status: x.to,
+        ...(x.to === "tomt" && S.items.get(x.id)?.place === "frys" ? { qty: 0 } : {}),
+        ...(x.to === "ok" ? { stockedAt: Date.now(), expiresOn: null } : {}),
+      });
       if (x.type === "remove") return itemDelete(x.id);
-      return itemAdd({ name: x.name, place, category: x.category, store: stores()[0].id, always: x.always, status: x.status, qty: x.qty });
+      return itemAdd({ name: x.name, place, category: x.category, store: stores()[0].id, always: x.always, status: x.status, qty: x.qty, shelfDays: x.shelfDays });
     });
     jobs.push(save(() => backend.markChecked(place, S.uid)));
     const res = await Promise.all(jobs);
@@ -614,10 +781,23 @@ $("#addForm").addEventListener("submit", async e => {
   if (!(await save(() => backend.extras.add({ name, store: S.addStore, done: false, ...by() })))) inp.value = name;
 });
 
+document.addEventListener("change", e => {
+  if (e.target.id !== "nextTrip") return;
+  const v = e.target.value || null;
+  save(() => backend.setTrip({ nextTrip: v })).then(ok => { if (ok && v) toast(`Neste tur: ${fmtDay(endOfDay(v))}`); });
+});
+
 document.addEventListener("click", async e => {
   const b = e.target.closest("[data-act]"); if (!b || b.closest("#sheet")) return;
   const { act, id, kind } = b.dataset;
   if (act === "goto") return go(b.dataset.tab);
+  if (act === "depart") return openDepart();
+  if (act === "arrive") return openArrive();
+  if (act === "renew") {
+    const it = S.items.get(id); if (!it) return;
+    if (await itemUpdate(id, { status: "tomt" })) toast(`${it.name} er på handlelisten`);
+    return;
+  }
   if (act === "starter") return openStarter();
   if (act === "edit") return openEdit(id || null);
   if (act === "place") { S.place = b.dataset.place; try { localStorage.setItem("hytte-place", S.place); } catch (e) {} return renderLager(); }
@@ -628,6 +808,7 @@ document.addEventListener("click", async e => {
     const it = S.items.get(id); if (!it) return;
     const to = NEXT[it.status] || "ok";
     const patch = { status: to, boughtAt: null };
+    if (to === "ok") { patch.stockedAt = Date.now(); patch.expiresOn = null; }
     if (it.place === "frys") { if (to === "tomt") patch.qty = 0; else if (!(Number(it.qty) > 0)) patch.qty = 1; }
     return itemUpdate(id, patch);
   }
@@ -635,7 +816,7 @@ document.addEventListener("click", async e => {
     const it = S.items.get(id); if (!it) return;
     const q = Math.max(0, (Number(it.qty) || 0) + Number(b.dataset.d));
     const patch = { qty: q };
-    if (q === 0) patch.status = "tomt"; else if (it.status === "tomt") patch.status = "ok";
+    if (q === 0) patch.status = "tomt"; else if (it.status === "tomt") { patch.status = "ok"; patch.stockedAt = Date.now(); }
     return itemUpdate(id, patch);
   }
   if (act === "buy") {
@@ -645,7 +826,7 @@ document.addEventListener("click", async e => {
     }
     const it = S.items.get(id); if (!it) return;
     if (boughtRecently(it)) return itemUpdate(id, { status: it.prevStatus || "tomt", boughtAt: null, ...(it.place === "frys" ? { qty: Number(it.prevQty) || 0 } : {}) });
-    const patch = { prevStatus: it.status, status: "ok", boughtAt: Date.now() };
+    const patch = { prevStatus: it.status, status: "ok", boughtAt: Date.now(), stockedAt: Date.now(), expiresOn: null };
     if (it.place === "frys") { patch.prevQty = Number(it.qty) || 0; patch.qty = (Number(it.qty) || 0) + 1; patch.frozen = thisMonth(); }
     return itemUpdate(id, patch);
   }
@@ -730,6 +911,8 @@ async function enter(user) {
       S.stores = [...data.stores].sort((a, b) => (a.sort || 0) - (b.sort || 0));
       S.checks = Object.fromEntries(data.place_checks.map(c => [c.place, c]));
       S.people = Object.fromEntries(data.profiles.map(p => [p.id, p.name]));
+      S.trip = data.trip_state[0] || { mode: "hjemme", nextTrip: null, changedAt: null };
+      if (S.trip.mode === "hytta") S.justDeparted = false;
       render();
       if (status === "ok" && !S.askedName) {
         S.askedName = true;
