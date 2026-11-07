@@ -674,17 +674,23 @@ function showAuth(step, email, err) {
       <label class="sr" for="au-email">E-post</label>
       <input id="au-email" type="email" autocomplete="email" inputmode="email" required value="${esc(email || "")}" placeholder="navn@eksempel.no">
       ${err ? `<p class="err">${esc(err)}</p>` : ""}
-      <button class="btn primary block" type="submit">Send kode</button></form>`;
+      <button class="btn primary block" type="submit">Send kode</button>
+      <button class="linkbtn" type="button" id="au-have">Jeg har allerede en kode</button></form>`;
+    $("#au-have").addEventListener("click", () => {
+      const em = $("#au-email").value.trim();
+      if (!em || !$("#au-email").checkValidity()) { $("#au-email").reportValidity(); return; }
+      showAuth("code", em);
+    });
     $("#au-form").addEventListener("submit", async e => {
       e.preventDefault();
       const em = $("#au-email").value.trim(); if (!em) return;
       const btn = e.target.querySelector("button"); btn.disabled = true; btn.textContent = "Sender …";
       try { await backend.sendCode(em); showAuth("code", em); }
-      catch (er) { showAuth("email", em, er?.status === 429 ? "Vent litt før du ber om en ny kode." : "Klarte ikke å sende koden. Sjekk adressen og prøv igjen."); }
+      catch (er) { showAuth("email", em, er?.status === 429 ? "Vent noen minutter før du ber om en ny kode. Har du allerede fått en, trykk «Jeg har allerede en kode»." : "Klarte ikke å sende koden. Sjekk adressen og prøv igjen."); }
     });
     return;
   }
-  body.innerHTML = `<form id="au-form"><p>Vi har sendt en kode til ${esc(email)}. Skriv den inn her.</p>
+  body.innerHTML = `<form id="au-form"><p>Skriv inn koden som ble sendt til ${esc(email)}. Sjekk søppelpost hvis den ikke er kommet.</p>
     <label class="sr" for="au-code">Kode</label>
     <input id="au-code" class="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6,10}" maxlength="10" required autofocus>
     ${err ? `<p class="err">${esc(err)}</p>` : ""}
