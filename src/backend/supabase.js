@@ -26,8 +26,11 @@ const MAPS = {
     },
   },
   trip_state: {
-    from: r => ({ id: r.id, mode: r.mode, changedAt: ms(r.changed_at), changedBy: r.changed_by, nextTrip: r.next_trip }),
-    cols: { mode: "mode", nextTrip: "next_trip" },
+    from: r => ({
+      id: r.id, mode: r.mode, changedAt: ms(r.changed_at), changedBy: r.changed_by, nextTrip: r.next_trip,
+      cabinLat: r.cabin_lat ?? null, cabinLng: r.cabin_lng ?? null,
+    }),
+    cols: { mode: "mode", nextTrip: "next_trip", cabinLat: "cabin_lat", cabinLng: "cabin_lng" },
   },
   extras: {
     from: r => ({
@@ -68,6 +71,14 @@ export async function sendCode(email) {
 }
 export async function verifyCode(email, token) {
   const { error } = await sb.auth.verifyOtp({ email, token, type: "email" });
+  if (error) throw error;
+}
+export async function signInWithPassword(email, password) {
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  if (error) throw error;
+}
+export async function setPassword(password) {
+  const { error } = await sb.auth.updateUser({ password });
   if (error) throw error;
 }
 export async function signOut() { await sb.auth.signOut(); }

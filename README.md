@@ -14,7 +14,7 @@ Matlager og handleliste for hytta på Bortelid. Mobilapp (PWA) på Vercel med Su
 1. Lag et nytt prosjekt på [supabase.com](https://supabase.com). Velg regionen **Stockholm (eu-north-1)**.
 2. Åpne **SQL Editor → New query** og lim inn hele [supabase/schema.sql](supabase/schema.sql).
    Bytt ut de to e-postadressene nederst med din og Christinas før du trykker **Run**.
-   Kjør deretter [supabase/002_turer.sql](supabase/002_turer.sql) på samme måte.
+   Kjør deretter [supabase/002_turer.sql](supabase/002_turer.sql) og [supabase/003_posisjon.sql](supabase/003_posisjon.sql) på samme måte.
 3. Gå til **Authentication → Emails → Magic Link** og legg til koden i e-posten, for eksempel:
    ```
    <h2>Kode til Hyttelageret</h2>

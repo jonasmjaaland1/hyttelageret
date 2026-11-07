@@ -4,21 +4,28 @@ import { createStore } from "./common.js";
 
 export const configured = true;
 const USER = { id: "mock-user", email: "test@eksempel.no" };
-let user = USER;
+const loggedOut = () => { try { return localStorage.getItem("mock-logged-out") === "1"; } catch (e) { return false; } };
+const setLoggedOut = v => { try { localStorage.setItem("mock-logged-out", v ? "1" : "0"); } catch (e) {} };
+let user = loggedOut() ? null : USER;
 const authCbs = [];
 
 export async function getUser() { return user; }
 export function onAuth(cb) { authCbs.push(cb); }
 export async function sendCode() {}
-export async function verifyCode() { user = USER; authCbs.forEach(cb => cb(user)); }
-export async function signOut() { user = null; authCbs.forEach(cb => cb(null)); }
+export async function verifyCode() { setLoggedOut(false); user = USER; authCbs.forEach(cb => cb(user)); }
+export async function signInWithPassword(email, password) {
+  if (password !== "hytta123") throw { message: "Invalid login credentials" };
+  setLoggedOut(false); user = USER; authCbs.forEach(cb => cb(user));
+}
+export async function setPassword() {}
+export async function signOut() { setLoggedOut(true); user = null; authCbs.forEach(cb => cb(null)); }
 export async function isMember() { return true; }
 
 const store = createStore();
 export const subscribeData = store.subscribe;
 export async function start() {
   store.replace("stores", [{ id: "krs", name: "Kristiansand", sort: 0 }, { id: "bortelid", name: "Bortelid", sort: 1 }]);
-  store.replace("trip_state", [{ id: "main", mode: "hytta", changedAt: Date.now() - 2 * 864e5, nextTrip: null }]);
+  store.replace("trip_state", [{ id: "main", mode: "hytta", changedAt: Date.now() - 2 * 864e5, nextTrip: null, cabinLat: 58.83, cabinLng: 7.33 }]);
   store.status("ok");
 }
 export async function setTrip(patch) { store.upsertLocal("trip_state", { id: "main", ...patch, changedAt: Date.now(), changedBy: user?.id }); }

@@ -39,7 +39,7 @@ const DAY = 864e5;
 const S = {
   user: null, uid: null,
   items: new Map(), extras: new Map(), people: {}, stores: DEFAULT_STORES, checks: {},
-  trip: { mode: "hjemme", nextTrip: null, changedAt: null }, justDeparted: false,
+  trip: { mode: "hjemme", nextTrip: null, changedAt: null }, justDeparted: false, where: null, offerPassword: false,
   status: "loading", slow: false, started: false, askedName: false,
   tab: "liste", place: "torr", addStore: "krs",
 };
@@ -192,25 +192,60 @@ function renderTrip() {
   const t = S.trip, since = t.changedAt ? fmtDay(t.changedAt) : "";
   if (t.mode === "hytta") {
     const soon = riskList(Date.now() + 2 * DAY);
-    out.innerHTML = `<div class="trip hytta">
-      <div class="trip-head"><span class="mode-dot"></span><div><b>På hytta</b><small>${esc(since ? "Kom fram " + since : "")}</small></div></div>
-      ${soon.length ? `<p class="soon">Bruk snart: ${soon.slice(0, 5).map(i => `<b>${esc(i.name)}</b>`).join(", ")}${soon.length > 5 ? ` og ${soon.length - 5} til` : ""}</p>` : ""}
+    const left = S.where === "far";
+    out.innerHTML = `<div class="trip ${left ? "" : "hytta"}">
+      <div class="trip-head"><span class="mode-dot"></span><div><b>${left ? "Har dere dratt?" : "På hytta"}</b><small>${esc(left ? "Du er et stykke unna hytta" : since ? "Kom fram " + since : "")}</small></div></div>
+      ${!left && soon.length ? `<p class="soon">Bruk snart: ${soon.slice(0, 5).map(i => `<b>${esc(i.name)}</b>`).join(", ")}${soon.length > 5 ? ` og ${soon.length - 5} til` : ""}</p>` : ""}
       <button class="btn primary block" type="button" data-act="depart">Vi drar</button>
     </div>`;
     return;
   }
-  const until = t.nextTrip ? endOfDay(t.nextTrip) : Date.now();
-  const risk = riskList(until);
-  out.innerHTML = `<div class="trip">
-    <div class="trip-head"><span class="mode-dot"></span><div><b>Hjemme</b><small>${esc(since ? "Dro fra hytta " + since : "")}</small></div></div>
-    <label class="tripdate">Neste tur<input type="date" id="nextTrip" value="${esc(t.nextTrip || "")}" min="${isoDay(Date.now())}"></label>
-    ${risk.length ? `<div class="risk-title">${t.nextTrip ? "Har trolig gått ut før turen" : "Har trolig gått ut"}</div>
+  const near = S.where === "near";
+  const risk = riskList(Date.now());
+  out.innerHTML = `<div class="trip ${near ? "hytta" : ""}">
+    <div class="trip-head"><span class="mode-dot"></span><div><b>${near ? "Du er ved hytta" : "Hjemme"}</b><small>${esc(near ? "Trykk når dere er fremme" : since ? "Dro fra hytta " + since : "")}</small></div></div>
+    ${!near && risk.length ? `<div class="risk-title">Har trolig gått ut på hytta</div>
       <ul class="rows">${risk.map(i => `<li>
         <div class="rname"><span>${esc(i.name)}</span><small>${esc(PLACE[i.place]?.name || "")} · holdt til ca. ${esc(fmtDay(expiresAt(i)))}</small></div>
         <button class="chipbtn" type="button" data-act="renew" data-id="${esc(i.id)}">Kjøp nytt</button>
       </li>`).join("")}</ul>` : ""}
-    <button class="btn primary block" type="button" data-act="arrive">Vi er på hytta</button>
+    <button class="btn ${near ? "primary" : ""} block" type="button" data-act="arrive">Vi er på hytta</button>
   </div>`;
+}
+
+// ---------- Posisjon ----------
+// Hyttas posisjon lagres i databasen. Telefonens posisjon brukes bare her, og sendes ingen steder.
+const NEAR_KM = 2, FAR_KM = 20;
+const hasCabin = () => Number.isFinite(S.trip.cabinLat) && Number.isFinite(S.trip.cabinLng);
+function distKm(lat1, lng1, lat2, lng2) {
+  const r = Math.PI / 180, dLat = (lat2 - lat1) * r, dLng = (lng2 - lng1) * r;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * r) * Math.cos(lat2 * r) * Math.sin(dLng / 2) ** 2;
+  return 12742 * Math.asin(Math.sqrt(h));
+}
+function getPosition(fresh) {
+  return new Promise(resolve => {
+    if (!navigator.geolocation) return resolve(null);
+    navigator.geolocation.getCurrentPosition(
+      p => { try { localStorage.setItem("hytte-gps", "1"); } catch (e) {} resolve({ lat: p.coords.latitude, lng: p.coords.longitude }); },
+      () => resolve(null),
+      { enableHighAccuracy: false, timeout: 10000, maximumAge: fresh ? 0 : 10 * 60e3 },
+    );
+  });
+}
+// Sjekker posisjonen stille når appen åpnes. Spør aldri om tillatelse av seg selv;
+// det skjer først når noen trykker «Vi er på hytta» eller lagrer hyttas posisjon.
+async function checkLocation() {
+  if (!hasCabin()) return;
+  let state = "unknown";
+  try { if (navigator.permissions) state = (await navigator.permissions.query({ name: "geolocation" })).state; } catch (e) {}
+  let optedIn = false;
+  try { optedIn = localStorage.getItem("hytte-gps") === "1"; } catch (e) {}
+  if (state === "denied" || (state !== "granted" && !optedIn)) return;
+  const pos = await getPosition(false);
+  if (!pos) return;
+  const d = distKm(pos.lat, pos.lng, S.trip.cabinLat, S.trip.cabinLng);
+  const where = d <= NEAR_KM ? "near" : d >= FAR_KM ? "far" : null;
+  if (where !== S.where) { S.where = where; render(); }
 }
 
 function renderBanner() {
@@ -466,10 +501,15 @@ function openSettings(first) {
     }).join("")}</ul>
     <form id="storeForm" class="addbar"><label class="sr" for="storeName">Ny butikk</label><input id="storeName" placeholder="Ny butikk, f.eks. Vinmonopolet" maxlength="40"><button class="btn" type="submit">Legg til</button></form>
     <p class="muted" style="font-size:13px;margin:0">En butikk kan fjernes når ingen varer kjøpes der.</p>
+    <h3 style="font-size:17px;margin-top:6px">Hyttas posisjon</h3>
+    <p class="muted" style="font-size:13px;margin:0">${hasCabin() ? "Lagret. Appen foreslår «Vi er på hytta» og «Vi drar» ut fra hvor du er." : "Ikke lagret ennå. Den lagres første gang noen trykker «Vi er på hytta» på hytta."}</p>
+    <button class="btn" type="button" id="setCabin">Lagre der jeg står nå som hytta</button>
+    <button class="btn" type="button" id="changePw">Bytt passord</button>
     <button class="btn ghost danger" type="button" id="signOut">Logg ut</button>`}`);
   const body = $("#sheetBody");
   body.addEventListener("click", async e => {
-    const w = e.target.closest("[data-who]"); if (w) { closeSheet(); await setName(w.dataset.who); return; }
+    const w = e.target.closest("[data-who]");
+    if (w) { closeSheet(); await setName(w.dataset.who); if (first && S.offerPassword) openSetPassword(); return; }
     const r = e.target.closest("[data-rmstore]");
     if (r) { closeSheet(); if (await save(() => backend.stores.remove(r.dataset.rmstore))) toast("Butikken er fjernet"); }
   });
@@ -482,6 +522,16 @@ function openSettings(first) {
   });
   const so = $("#signOut");
   if (so) so.addEventListener("click", async () => { closeSheet(); await backend.signOut(); });
+  const cp = $("#changePw");
+  if (cp) cp.addEventListener("click", openSetPassword);
+  const sc = $("#setCabin");
+  if (sc) sc.addEventListener("click", async () => {
+    sc.disabled = true; sc.textContent = "Finner posisjonen …";
+    const pos = await getPosition(true);
+    closeSheet();
+    if (!pos) { toast("Fikk ikke tak i posisjonen. Sjekk at appen har lov til å bruke stedstjenester."); return; }
+    if (await save(() => backend.setTrip({ cabinLat: pos.lat, cabinLng: pos.lng }))) toast("Hyttas posisjon er lagret");
+  });
 }
 async function setName(n) {
   if (await save(() => backend.setName(S.uid, n))) render();
@@ -489,52 +539,24 @@ async function setName(n) {
 
 // ---------- Vi drar ----------
 function openDepart() {
-  const today = isoDay(Date.now());
-  const quick = [["7", "Om en uke"], ["14", "Om to uker"], ["30", "Om en måned"], ["60", "Lengre"]];
-  openSheet(`<h2>Vi drar</h2><p class="lead">Når kommer dere tilbake? Da ser appen hvilke ferskvarer som ikke holder til da.</p>
-    <div class="choices">${quick.map(([d, l]) => `<button class="btn" type="button" data-days="${d}">${l}</button>`).join("")}</div>
-    <label class="field">Eller velg dato<input type="date" id="dp-date" min="${today}"></label>
-    <div class="foot"><button class="btn ghost" type="button" id="dp-unknown">Vet ikke</button>
-    <button class="btn primary" type="button" id="dp-next" disabled>Neste</button></div>`);
-  const body = $("#sheetBody");
-  body.addEventListener("click", e => {
-    const b = e.target.closest("[data-days]"); if (!b) return;
-    departStep2(isoDay(Date.now() + Number(b.dataset.days) * DAY));
-  });
-  $("#dp-date").addEventListener("change", e => { $("#dp-next").disabled = !e.target.value; });
-  $("#dp-next").addEventListener("click", () => { const v = $("#dp-date").value; if (v) departStep2(v); });
-  $("#dp-unknown").addEventListener("click", () => departStep2(null));
-}
-
-function departStep2(nextTrip) {
-  const until = nextTrip ? endOfDay(nextTrip) : Date.now() + UNKNOWN_RETURN_DAYS * DAY;
-  const list = riskList(until).filter(i => i.place !== "frys");
-  const when = nextTrip ? `til ${fmtDay(endOfDay(nextTrip))}` : `de neste ${UNKNOWN_RETURN_DAYS} dagene`;
-  if (!list.length) {
-    openSheet(`<h2>Alt holder</h2><p class="lead">Ingen ferskvarer går ut ${esc(when)}, så dere kan dra.</p>
-      <div class="foot"><button class="btn ghost" type="button" id="dp-back">Tilbake</button><button class="btn primary" type="button" id="dp-save">Vi drar</button></div>`);
-  } else {
-    openSheet(`<h2>Ferskvarer</h2><p class="lead">Velg hva dere gjør med det som trolig ikke holder ${esc(when)}:</p>
-      <ul class="dplist">${list.map(i => `<li>
-        <div><span>${esc(i.name)}</span><small>holder til ca. ${esc(fmtDay(expiresAt(i)))}</small></div>
-        ${segHtml("dp-" + i.id, [["bort", "Ta med / kast"], ["frys", "Frys"], ["sta", "La stå"]], "bort", "").replace('class="seg"', 'class="seg small"')}
-      </li>`).join("")}</ul>
-      <div class="foot"><button class="btn ghost" type="button" id="dp-back">Tilbake</button><button class="btn primary" type="button" id="dp-save">Lagre og dra</button></div>`);
-  }
-  $("#dp-back").addEventListener("click", openDepart);
+  const list = riskList(Date.now() + UNKNOWN_RETURN_DAYS * DAY).filter(i => i.place !== "frys");
+  openSheet(`<h2>Vi drar</h2>
+    <p class="lead">${list.length ? "Dette holder trolig ikke til neste tur. Ta det med eller kast det. Fjern haken på det som skal stå." : "Ingen ferskvarer å ta med. God tur hjem!"}</p>
+    ${list.length ? `<ul class="props">${list.map(i => `<li>
+      <input type="checkbox" id="dp-${esc(i.id)}" data-id="${esc(i.id)}" checked>
+      <label class="main" for="dp-${esc(i.id)}"><span>${esc(i.name)}</span><small>${esc(PLACE[i.place]?.name || "")} · holder til ca. ${esc(fmtDay(expiresAt(i)))}</small></label>
+    </li>`).join("")}</ul>` : ""}
+    <div class="foot"><button class="btn ghost" type="button" id="dp-cancel">Avbryt</button><button class="btn primary" type="button" id="dp-save">Vi drar</button></div>`);
+  $("#dp-cancel").addEventListener("click", closeSheet);
   $("#dp-save").addEventListener("click", async () => {
-    const choices = list.map(i => [i, document.querySelector(`input[name="dp-${i.id}"]:checked`)?.value || "bort"]);
+    const gone = [...document.querySelectorAll("#sheetBody input[data-id]:checked")].map(b => S.items.get(b.dataset.id)).filter(Boolean);
     closeSheet();
-    const jobs = choices.map(([i, c]) => {
-      if (c === "frys") return itemUpdate(i.id, { place: "frys", qty: Math.max(1, Number(i.qty) || 1), frozen: thisMonth(), expiresOn: null });
-      if (c === "bort") return i.always ? itemUpdate(i.id, { status: "tomt" }) : itemDelete(i.id);
-      return true;
-    });
-    jobs.push(save(() => backend.setTrip({ mode: "hjemme", nextTrip })));
+    const jobs = gone.map(i => (i.always ? itemUpdate(i.id, { status: "tomt" }) : itemDelete(i.id)));
+    jobs.push(save(() => backend.setTrip({ mode: "hjemme", nextTrip: null })));
     await Promise.all(jobs);
-    S.justDeparted = true;
+    S.where = null; S.justDeparted = true;
     go("sjekk");
-    toast("Avreise lagret. God tur hjem!");
+    toast("God tur hjem!");
   });
 }
 
@@ -560,7 +582,13 @@ function openArrive() {
     });
     jobs.push(save(() => backend.setTrip({ mode: "hytta", nextTrip: null })));
     await Promise.all(jobs);
-    S.justDeparted = false;
+    S.justDeparted = false; S.where = null;
+    if (!hasCabin()) {
+      // Første gang: bruk posisjonen her som hyttas posisjon.
+      getPosition(true).then(pos => {
+        if (pos) save(() => backend.setTrip({ cabinLat: pos.lat, cabinLng: pos.lng })).then(ok => { if (ok) toast("Hyttas posisjon er lagret"); });
+      });
+    }
     go("liste");
     toast("Velkommen til hytta!");
   });
@@ -760,6 +788,7 @@ function go(tab) {
 }
 window.addEventListener("hashchange", () => { const t = location.hash.slice(1); if (["liste", "lager", "sjekk"].includes(t)) { S.tab = t; render(); } });
 window.addEventListener("online", () => render());
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && S.started) checkLocation(); });
 window.addEventListener("offline", () => render());
 for (const t of document.querySelectorAll(".tab")) t.addEventListener("click", () => go(t.dataset.tab));
 $("#meBtn").addEventListener("click", () => openSettings(false));
@@ -779,12 +808,6 @@ $("#addForm").addEventListener("submit", async e => {
     return;
   }
   if (!(await save(() => backend.extras.add({ name, store: S.addStore, done: false, ...by() })))) inp.value = name;
-});
-
-document.addEventListener("change", e => {
-  if (e.target.id !== "nextTrip") return;
-  const v = e.target.value || null;
-  save(() => backend.setTrip({ nextTrip: v })).then(ok => { if (ok && v) toast(`Neste tur: ${fmtDay(endOfDay(v))}`); });
 });
 
 document.addEventListener("click", async e => {
@@ -838,9 +861,14 @@ document.addEventListener("click", async e => {
 });
 
 // ---------- Innlogging ----------
+// Vanlig innlogging er e-post og passord. Kode på e-post brukes første gang og når passordet er glemt.
+function lastEmail() { try { return localStorage.getItem("hytte-email") || ""; } catch (e) { return ""; } }
+function rememberEmail(em) { try { localStorage.setItem("hytte-email", em); } catch (e) {} }
+
 function showAuth(step, email, err) {
   $("#app").hidden = true; $("#auth").hidden = false;
   const body = $("#authBody");
+  email = email ?? lastEmail();
   if (step === "nokey") {
     body.innerHTML = `<p>Appen mangler kobling til databasen. Sett VITE_SUPABASE_URL og VITE_SUPABASE_ANON_KEY i Vercel og publiser på nytt.</p>`;
     return;
@@ -850,13 +878,35 @@ function showAuth(step, email, err) {
     $("#au-out").addEventListener("click", () => backend.signOut());
     return;
   }
-  if (step === "email") {
-    body.innerHTML = `<form id="au-form"><p>Skriv inn e-posten din, så får du en kode.</p>
+  if (step === "login") {
+    body.innerHTML = `<form id="au-form">
       <label class="sr" for="au-email">E-post</label>
-      <input id="au-email" type="email" autocomplete="email" inputmode="email" required value="${esc(email || "")}" placeholder="navn@eksempel.no">
+      <input id="au-email" type="email" autocomplete="username" inputmode="email" required value="${esc(email)}" placeholder="E-post">
+      <label class="sr" for="au-pass">Passord</label>
+      <input id="au-pass" type="password" autocomplete="current-password" required placeholder="Passord">
+      ${err ? `<p class="err">${esc(err)}</p>` : ""}
+      <button class="btn primary block" type="submit">Logg inn</button>
+      <button class="linkbtn" type="button" id="au-code">Første gang, eller glemt passordet? Få en kode på e-post</button></form>`;
+    $("#au-code").addEventListener("click", () => showAuth("email", $("#au-email").value.trim()));
+    $("#au-form").addEventListener("submit", async e => {
+      e.preventDefault();
+      const em = $("#au-email").value.trim(), pw = $("#au-pass").value;
+      if (!em || !pw) return;
+      const btn = e.target.querySelector("button[type=submit]"); btn.disabled = true; btn.textContent = "Logger inn …";
+      try { rememberEmail(em); await backend.signInWithPassword(em, pw); }
+      catch (er) { showAuth("login", em, "Feil e-post eller passord. Har du ikke laget passord ennå, trykk «Få en kode på e-post»."); }
+    });
+    return;
+  }
+  if (step === "email") {
+    body.innerHTML = `<form id="au-form"><p>Du får en kode på e-post. Etterpå kan du lage et passord.</p>
+      <label class="sr" for="au-email">E-post</label>
+      <input id="au-email" type="email" autocomplete="email" inputmode="email" required value="${esc(email)}" placeholder="navn@eksempel.no">
       ${err ? `<p class="err">${esc(err)}</p>` : ""}
       <button class="btn primary block" type="submit">Send kode</button>
-      <button class="linkbtn" type="button" id="au-have">Jeg har allerede en kode</button></form>`;
+      <button class="linkbtn" type="button" id="au-have">Jeg har allerede en kode</button>
+      <button class="linkbtn" type="button" id="au-pw">Logg inn med passord</button></form>`;
+    $("#au-pw").addEventListener("click", () => showAuth("login", $("#au-email").value.trim()));
     $("#au-have").addEventListener("click", () => {
       const em = $("#au-email").value.trim();
       if (!em || !$("#au-email").checkValidity()) { $("#au-email").reportValidity(); return; }
@@ -866,7 +916,7 @@ function showAuth(step, email, err) {
       e.preventDefault();
       const em = $("#au-email").value.trim(); if (!em) return;
       const btn = e.target.querySelector("button"); btn.disabled = true; btn.textContent = "Sender …";
-      try { await backend.sendCode(em); showAuth("code", em); }
+      try { rememberEmail(em); await backend.sendCode(em); showAuth("code", em); }
       catch (er) { showAuth("email", em, er?.status === 429 ? "Vent noen minutter før du ber om en ny kode. Har du allerede fått en, trykk «Jeg har allerede en kode»." : "Klarte ikke å sende koden. Sjekk adressen og prøv igjen."); }
     });
     return;
@@ -876,15 +926,35 @@ function showAuth(step, email, err) {
     <input id="au-code" class="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6,10}" maxlength="10" required autofocus>
     ${err ? `<p class="err">${esc(err)}</p>` : ""}
     <button class="btn primary block" type="submit">Logg inn</button>
-    <button class="linkbtn" type="button" id="au-back">Bruk en annen adresse</button></form>`;
+    <button class="linkbtn" type="button" id="au-back">Tilbake</button></form>`;
   $("#au-code").focus();
-  $("#au-back").addEventListener("click", () => showAuth("email", email));
+  $("#au-back").addEventListener("click", () => showAuth("login", email));
   $("#au-form").addEventListener("submit", async e => {
     e.preventDefault();
     const code = $("#au-code").value.replace(/\D/g, ""); if (!code) return;
     const btn = e.target.querySelector("button[type=submit]"); btn.disabled = true; btn.textContent = "Logger inn …";
+    S.offerPassword = true; // etter kode-innlogging: be om å lage passord
     try { await backend.verifyCode(email, code); }
-    catch (er) { showAuth("code", email, "Koden stemmer ikke eller er utløpt. Prøv igjen, eller be om en ny."); }
+    catch (er) { S.offerPassword = false; showAuth("code", email, "Koden stemmer ikke eller er utløpt. Prøv igjen, eller be om en ny."); }
+  });
+}
+
+function openSetPassword() {
+  S.offerPassword = false;
+  openSheet(`<h2>Lag et passord</h2>
+    <p class="lead">Da logger du inn med e-post og passord neste gang, uten kode. Minst 8 tegn.</p>
+    <form id="pwForm" style="display:flex;flex-direction:column;gap:10px">
+      <input type="email" autocomplete="username" value="${esc(S.user?.email || "")}" hidden>
+      <label class="field">Nytt passord<input id="pw-new" type="password" autocomplete="new-password" minlength="8" required></label>
+      <p class="err" id="pw-err" hidden></p>
+      <div class="foot"><button class="btn ghost" type="button" id="pw-skip">Senere</button><button class="btn primary" type="submit">Lagre passord</button></div>
+    </form>`);
+  $("#pw-skip").addEventListener("click", closeSheet);
+  $("#pwForm").addEventListener("submit", async e => {
+    e.preventDefault();
+    const pw = $("#pw-new").value;
+    try { await backend.setPassword(pw); closeSheet(); toast("Passordet er lagret"); }
+    catch (er) { const el = $("#pw-err"); el.hidden = false; el.textContent = "Klarte ikke å lagre passordet. Prøv et lengre passord."; }
   });
 }
 
@@ -892,7 +962,7 @@ let entered = null;
 async function enter(user) {
   if (!user) {
     if (S.started) { location.reload(); return; } // utlogget: start rent
-    entered = null; S.user = null; S.uid = null; showAuth("email"); return;
+    entered = null; S.user = null; S.uid = null; showAuth("login"); return;
   }
   if (entered === user.id) return;
   entered = user.id;
@@ -917,7 +987,9 @@ async function enter(user) {
       if (status === "ok" && !S.askedName) {
         S.askedName = true;
         if (!S.people[S.uid] && $("#sheet").hidden) openSettings(true);
+        else if (S.offerPassword && $("#sheet").hidden) openSetPassword();
         cleanupExtras();
+        checkLocation();
       }
     });
     await backend.start();

@@ -1,7 +1,7 @@
 -- Hyttelageret: database og tilgangsregler.
 -- Kjør hele filen én gang i Supabase: SQL Editor → New query → lim inn → Run.
 -- Bytt ut de to e-postadressene nederst før du kjører.
--- Kjør deretter endringsfilene i rekkefølge: 002_turer.sql.
+-- Kjør deretter endringsfilene i rekkefølge: 002_turer.sql, 003_posisjon.sql.
 
 -- Hvem som slipper inn. Bare disse adressene kan lese eller endre noe.
 create table if not exists public.allowed_emails (
