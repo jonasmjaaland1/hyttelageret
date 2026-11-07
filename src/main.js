@@ -33,6 +33,8 @@ const SHELF_DEFAULT = { frukt: 7, brod: 4, meieri: 10, palegg: 21, kjott: 3, kry
 const STARTER_SHELF = { "Smør": 60, "Egg": 28, "Brunost": 60, "Syltetøy": 90, "Majones": 60, "Ketchup": 180, "Sennep": 180 };
 const SHELF_OPTIONS = [["", "Automatisk"], ["3", "3 dager"], ["7", "1 uke"], ["14", "2 uker"], ["30", "1 måned"], ["90", "3 måneder"], ["365", "Holder lenge"]];
 const UNKNOWN_RETURN_DAYS = 14;
+const TABS = ["liste", "lager", "plan", "sjekk"];
+const MEAL_LABEL = { frokost: "Frokost", lunsj: "Lunsj", middag: "Middag" };
 // Ukens kundeaviser hos Mattilbud. Rekkefølge: lavpris først.
 const FLYERS = [
   ["REMA 1000", "rema-1000-no"], ["KIWI", "kiwi-no"], ["Extra", "extra-no"], ["Obs", "obs-no"],
@@ -44,7 +46,7 @@ const DAY = 864e5;
 const S = {
   user: null, uid: null,
   items: new Map(), extras: new Map(), people: {}, stores: DEFAULT_STORES, checks: {},
-  trip: { mode: "hjemme", nextTrip: null, changedAt: null }, justDeparted: false, where: null, offerPassword: false,
+  trip: { mode: "hjemme", nextTrip: null, changedAt: null }, justDeparted: false, where: null, offerPassword: false, plan: null, planBusy: null,
   status: "loading", slow: false, started: false, askedName: false,
   tab: "liste", place: "torr", addStore: "krs",
 };
@@ -165,7 +167,7 @@ function shopping() {
   }
   for (const x of S.extras.values()) {
     if (!x.done || (x.doneAt && Date.now() - x.doneAt < BOUGHT_WINDOW)) rows.push({
-      kind: "extra", id: x.id, name: x.name, store: validStore(x.store), cat: "annet", done: !!x.done,
+      kind: "extra", id: x.id, name: x.name, store: validStore(x.store), cat: CAT[x.category] ? x.category : "annet", done: !!x.done, note: x.note,
     });
   }
   return rows;
@@ -177,6 +179,7 @@ function render() {
   if (S.tab === "liste") renderListe();
   if (S.tab === "lager") renderLager();
   if (S.tab === "sjekk") renderSjekk();
+  if (S.tab === "plan") renderPlan();
 }
 
 function renderActivity() {
@@ -264,7 +267,7 @@ function renderBanner() {
 
 function renderTabs() {
   for (const t of document.querySelectorAll(".tab")) t.setAttribute("aria-current", t.dataset.tab === S.tab ? "page" : "false");
-  for (const v of ["liste", "lager", "sjekk"]) $("#view-" + v).hidden = v !== S.tab;
+  for (const v of TABS) $("#view-" + v).hidden = v !== S.tab;
   const n = shopping().filter(r => !r.done).length;
   const c = $("#listCount"); c.hidden = !n; c.textContent = n;
   S.addStore = validStore(S.addStore);
@@ -272,7 +275,7 @@ function renderTabs() {
 }
 
 function rowName(r) {
-  const sub = r.kind === "item" ? `${r.done ? "Handlet" : STATUS[r.status]} · ${PLACE[r.place]?.name || ""}` : "Lagt til";
+  const sub = r.kind === "item" ? `${r.done ? "Handlet" : STATUS[r.status]} · ${PLACE[r.place]?.name || ""}` : (r.note || "Lagt til");
   return `<div class="rname"><span>${esc(r.name)}</span><small>${esc(sub)}</small></div>`;
 }
 function shopRow(r) {
@@ -600,6 +603,166 @@ function openArrive() {
   });
 }
 
+// ---------- Planleggeren ----------
+let planForm = { days: 3, people: 2, mealTypes: ["middag"], wishes: "" };
+try { const f = JSON.parse(localStorage.getItem("hytte-planform") || "null"); if (f) planForm = { ...planForm, ...f, wishes: "" }; } catch (e) {}
+
+const inventoryForPlan = () => [...S.items.values()].map(i => ({ name: i.name, status: i.status }));
+function onListNames() {
+  const set = new Set();
+  for (const x of S.extras.values()) if (!x.done) set.add(norm(x.name));
+  for (const i of S.items.values()) if (needs(i)) set.add(norm(i.name));
+  return set;
+}
+// Det som må kjøpes til planen, slått sammen på tvers av rettene
+function planNeeds(plan) {
+  const atCabin = new Set([...S.items.values()].filter(i => i.status !== "tomt").map(i => norm(i.name)));
+  const map = new Map();
+  for (const m of plan.meals || []) for (const g of m.ingredients || []) {
+    const k = norm(g.name);
+    if (g.have || atCabin.has(k)) continue;
+    const e = map.get(k) || { name: g.name, category: g.category, amounts: [], meals: [] };
+    if (g.amount) e.amounts.push(g.amount);
+    if (!e.meals.includes(m.title)) e.meals.push(m.title);
+    map.set(k, e);
+  }
+  return [...map.values()].sort((a, b) => (CAT_ORDER[a.category] ?? 99) - (CAT_ORDER[b.category] ?? 99) || a.name.localeCompare(b.name, "nb"));
+}
+const needNote = n => `${n.amounts.join(" + ")}${n.amounts.length ? " · " : ""}${n.meals.join(", ")}`;
+
+function renderPlan() {
+  const out = $("#planOut");
+  if (S.status === "loading") { out.innerHTML = ""; return; }
+  const busy = S.planBusy;
+  if (busy && busy.kind === "new") {
+    out.innerHTML = `<div class="busy"><div class="spinner" aria-hidden="true"></div><h2>Lager menyforslag</h2>
+      <p class="muted" style="margin:0">Ser på ønskene og det som står på hytta. Det tar gjerne 20–40 sekunder.</p>
+      <button class="btn" type="button" data-act="plan-stop">Stopp</button></div>`;
+    return;
+  }
+  const plan = S.plan;
+  if (!plan || !plan.meals?.length) { out.innerHTML = planFormHtml(); return; }
+
+  const days = [...new Set(plan.meals.map(m => m.day))].sort((a, b) => a - b);
+  const order = { frokost: 0, lunsj: 1, middag: 2 };
+  let html = `<div class="planhead"><h2>Menyen</h2><small>${plan.days} dag${plan.days === 1 ? "" : "er"} · ${plan.people} pers.</small></div>`;
+  if (plan.wishes) html += `<p class="muted" style="margin:0;font-size:14px">Ønsker: ${esc(plan.wishes)}</p>`;
+  for (const d of days) {
+    html += `<div class="dayblock"><div class="daylabel">Dag ${d}</div>`;
+    plan.meals.map((m, i) => [m, i]).filter(([m]) => m.day === d).sort((a, b) => order[a[0].type] - order[b[0].type]).forEach(([m, i]) => {
+      const isBusy = busy && busy.kind === "replace" && busy.index === i;
+      html += `<div class="meal ${isBusy ? "busy" : ""}">
+        <div class="mtop"><div><div class="mtype">${MEAL_LABEL[m.type] || ""}</div><h3>${esc(isBusy ? "Finner en annen rett …" : m.title)}</h3></div>
+        <button class="chipbtn" type="button" data-act="plan-swap" data-i="${i}" ${busy ? "disabled" : ""}>Bytt</button></div>
+        ${isBusy ? "" : `<p>${esc(m.description)}</p>
+        <div class="ingr">${(m.ingredients || []).map(g => `<span class="${g.have ? "have" : ""}">${esc(g.name)}${g.amount ? " " + esc(g.amount) : ""}</span>`).join("")}</div>`}
+      </div>`;
+    });
+    html += `</div>`;
+  }
+  const needs = planNeeds(plan), onList = onListNames();
+  const toAdd = needs.filter(n => !onList.has(norm(n.name)));
+  html += `<div class="buybox"><h3>Må kjøpes</h3>`;
+  if (!needs.length) html += `<p class="muted" style="margin:0">Alt står allerede på hytta.</p>`;
+  else html += `<ul>${needs.map(n => `<li class="${onList.has(norm(n.name)) ? "onlist" : ""}"><span>${esc(n.name)}</span><small>${onList.has(norm(n.name)) ? "på listen" : esc(n.amounts.join(" + "))}</small></li>`).join("")}</ul>`;
+  html += toAdd.length
+    ? `<button class="btn primary block" type="button" data-act="plan-add" ${busy ? "disabled" : ""}>Legg ${toAdd.length} vare${toAdd.length === 1 ? "" : "r"} på handlelisten</button>`
+    : needs.length ? `<p class="muted" style="margin:0;font-size:14px">Alt står på handlelisten.</p>` : "";
+  html += `</div>
+    <button class="btn ghost block" type="button" data-act="plan-new" ${busy ? "disabled" : ""}>Lag en ny plan</button>`;
+  out.innerHTML = html;
+}
+
+function planFormHtml() {
+  const f = planForm;
+  return `<form class="planform" id="planForm" autocomplete="off">
+    <h2>Planleggeren</h2>
+    <p class="lead">Fortell hva dere har lyst på, så lager Claude en meny og handleliste. Det som står på hytta, trekkes fra.</p>
+    <div class="steprow">Antall dager<div class="stepper"><button type="button" data-step="days" data-d="-1" aria-label="Færre dager">−</button><span id="pf-days">${f.days}</span><button type="button" data-step="days" data-d="1" aria-label="Flere dager">+</button></div></div>
+    <div class="steprow">Antall personer<div class="stepper"><button type="button" data-step="people" data-d="-1" aria-label="Færre personer">−</button><span id="pf-people">${f.people}</span><button type="button" data-step="people" data-d="1" aria-label="Flere personer">+</button></div></div>
+    <div><div class="cat" style="margin:0 0 6px">Måltider</div><div class="mealpick">${Object.entries(MEAL_LABEL).map(([k, l]) =>
+      `<label><input type="checkbox" name="pf-meal" value="${k}" ${f.mealTypes.includes(k) ? "checked" : ""}>${l}</label>`).join("")}</div></div>
+    <label class="field">Hva har dere lyst på?<textarea id="pf-wishes" placeholder="F.eks. taco én dag, fisk, noe enkelt første kveld, ingen sopp">${esc(f.wishes)}</textarea></label>
+    <button class="btn primary block" type="submit">Lag menyforslag</button>
+  </form>`;
+}
+
+function readPlanForm() {
+  const types = [...document.querySelectorAll('input[name="pf-meal"]:checked')].map(i => i.value);
+  planForm = { ...planForm, mealTypes: types, wishes: ($("#pf-wishes")?.value || "").trim() };
+  try { localStorage.setItem("hytte-planform", JSON.stringify({ days: planForm.days, people: planForm.people, mealTypes: planForm.mealTypes })); } catch (e) {}
+  return planForm;
+}
+
+const planError = e => (ERRORS[e?.code] || ["Fikk ikke et menyforslag. Prøv igjen."])[0];
+
+async function makePlan() {
+  const f = readPlanForm();
+  if (!f.mealTypes.length) { toast("Velg minst ett måltid"); return; }
+  const ctl = new AbortController();
+  S.planBusy = { kind: "new", ctl }; renderPlan();
+  try {
+    const res = await backend.planMenu({ days: f.days, people: f.people, mealTypes: f.mealTypes, wishes: f.wishes, inventory: inventoryForPlan() }, ctl.signal);
+    await save(() => backend.savePlan({ days: f.days, people: f.people, mealTypes: f.mealTypes, wishes: f.wishes, meals: res.meals, createdAt: Date.now() }));
+  } catch (e) {
+    if (e?.code !== "cancelled") toast(planError(e));
+  } finally {
+    S.planBusy = null; renderPlan();
+  }
+}
+
+function openSwap(index) {
+  const m = S.plan?.meals?.[index]; if (!m) return;
+  openSheet(`<h2>Bytt ${esc(MEAL_LABEL[m.type].toLowerCase())} dag ${m.day}</h2>
+    <p class="lead">I stedet for ${esc(m.title)}. Skriv gjerne hva du har lyst på, eller la feltet stå tomt.</p>
+    <form id="swapForm" style="display:flex;flex-direction:column;gap:12px" autocomplete="off">
+      <label class="field">Ønske<input id="sw-wish" placeholder="F.eks. noe med kylling" maxlength="300" enterkeyhint="go"></label>
+      <div class="foot"><button class="btn ghost" type="button" id="sw-cancel">Avbryt</button><button class="btn primary" type="submit">Finn en annen rett</button></div>
+    </form>`);
+  $("#sw-cancel").addEventListener("click", closeSheet);
+  $("#swapForm").addEventListener("submit", e => { e.preventDefault(); const w = $("#sw-wish").value.trim(); closeSheet(); swapMeal(index, w); });
+}
+
+async function swapMeal(index, wish) {
+  const plan = S.plan, m = plan.meals[index];
+  S.planBusy = { kind: "replace", index }; renderPlan();
+  try {
+    const res = await backend.planMenu({
+      days: plan.days, people: plan.people, mealTypes: plan.mealTypes, wishes: plan.wishes || "", inventory: inventoryForPlan(),
+      replace: { day: m.day, type: m.type, wish, oldTitle: m.title, otherTitles: plan.meals.filter((_, j) => j !== index).map(x => x.title) },
+    });
+    const meals = plan.meals.slice(); meals[index] = { ...res.meal, day: m.day, type: m.type };
+    await save(() => backend.savePlan({ ...plan, meals }));
+  } catch (e) {
+    toast(planError(e));
+  } finally {
+    S.planBusy = null; renderPlan();
+  }
+}
+
+async function addPlanToList() {
+  const onList = onListNames();
+  const toAdd = planNeeds(S.plan).filter(n => !onList.has(norm(n.name)));
+  if (!toAdd.length) return;
+  const store = stores()[0].id;
+  const res = await Promise.all(toAdd.map(n => save(() => backend.extras.add({
+    name: n.name, store, done: false, category: CAT[n.category] ? n.category : "annet", note: needNote(n).slice(0, 200), ...by(),
+  }))));
+  const ok = res.filter(Boolean).length;
+  if (ok) { toast(`${ok} vare${ok === 1 ? "" : "r"} lagt på handlelisten`); go("liste"); }
+}
+
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-step]"); if (!b) return;
+  const key = b.dataset.step, max = key === "days" ? 14 : 12;
+  planForm[key] = Math.min(max, Math.max(1, planForm[key] + Number(b.dataset.d)));
+  $("#pf-" + key).textContent = planForm[key];
+});
+document.addEventListener("submit", e => {
+  if (e.target.id !== "planForm") return;
+  e.preventDefault(); makePlan();
+});
+
 // ---------- Bildesjekk ----------
 let photo = null;
 function startPhoto(place) {
@@ -792,7 +955,7 @@ function go(tab) {
   if (location.hash !== "#" + tab) history.replaceState(null, "", "#" + tab);
   render(); window.scrollTo(0, 0);
 }
-window.addEventListener("hashchange", () => { const t = location.hash.slice(1); if (["liste", "lager", "sjekk"].includes(t)) { S.tab = t; render(); } });
+window.addEventListener("hashchange", () => { const t = location.hash.slice(1); if (TABS.includes(t)) { S.tab = t; render(); } });
 window.addEventListener("online", () => render());
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && S.started) checkLocation(); });
 window.addEventListener("offline", () => render());
@@ -821,6 +984,14 @@ document.addEventListener("click", async e => {
   const { act, id, kind } = b.dataset;
   if (act === "goto") return go(b.dataset.tab);
   if (act === "depart") return openDepart();
+  if (act === "plan-stop") { S.planBusy?.ctl?.abort(); return; }
+  if (act === "plan-swap") return openSwap(Number(b.dataset.i));
+  if (act === "plan-add") return addPlanToList();
+  if (act === "plan-new") {
+    if (S.plan) planForm = { ...planForm, days: S.plan.days, people: S.plan.people, mealTypes: S.plan.mealTypes || planForm.mealTypes, wishes: "" };
+    await save(() => backend.clearPlan());
+    return renderPlan();
+  }
   if (act === "arrive") return openArrive();
   if (act === "renew") {
     const it = S.items.get(id); if (!it) return;
@@ -988,6 +1159,7 @@ async function enter(user) {
       S.checks = Object.fromEntries(data.place_checks.map(c => [c.place, c]));
       S.people = Object.fromEntries(data.profiles.map(p => [p.id, p.name]));
       S.trip = data.trip_state[0] || { mode: "hjemme", nextTrip: null, changedAt: null };
+      S.plan = data.plans?.[0]?.data || null;
       if (S.trip.mode === "hytta") S.justDeparted = false;
       render();
       if (status === "ok" && !S.askedName) {
@@ -1010,7 +1182,7 @@ function cleanupExtras() {
 
 // ---------- Oppstart ----------
 const initTab = location.hash.slice(1);
-S.tab = ["liste", "lager", "sjekk"].includes(initTab) ? initTab : "liste";
+S.tab = TABS.includes(initTab) ? initTab : "liste";
 
 if (!backend.configured) showAuth("nokey");
 else {

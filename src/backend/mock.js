@@ -49,3 +49,24 @@ export async function analyze(place, known) {
     new: [{ name: "Leverpostei", category: "palegg", staple: false, level: "ok", count: 1, shelf_days: 10 }],
   };
 }
+
+export async function savePlan(data) { store.upsertLocal("plans", { id: "current", data, updatedBy: user?.id }); }
+export async function clearPlan() { store.removeLocal("plans", "current"); }
+export async function planMenu(p) {
+  await new Promise(r => setTimeout(r, 500));
+  const ing = (name, amount, category, have = false) => ({ name, amount, category, have });
+  const dinners = [
+    { title: "Pølser i lompe", description: "Enkel første kveld.", ingredients: [ing("Pølser", "2 pk", "kjott", true), ing("Lomper", "1 pk", "brod"), ing("Ketchup", "1 fl", "krydder", true)] },
+    { title: "Taco", description: "Fredagstaco med alt tilbehør.", ingredients: [ing("Kjøttdeig", "400 g", "kjott"), ing("Tacoskjell", "1 pk", "torr"), ing("Rømme", "1 beger", "meieri"), ing("Salat", "1 stk", "frukt")] },
+    { title: "Laks i ovn", description: "Laks med poteter og brokkoli.", ingredients: [ing("Laks", "400 g", "kjott"), ing("Poteter", "1 kg", "frukt"), ing("Brokkoli", "1 stk", "frukt"), ing("Smør", "50 g", "meieri", true)] },
+  ];
+  if (p.replace) {
+    return { meal: { day: p.replace.day, type: p.replace.type, title: "Kyllinggryte", description: "Kremet gryte med ris.", ingredients: [ing("Kyllingfilet", "400 g", "kjott"), ing("Ris", "2 dl", "torr", true), ing("Matfløte", "3 dl", "meieri"), ing("Rømme", "1 beger", "meieri")] } };
+  }
+  const meals = [];
+  for (let d = 1; d <= p.days; d++) for (const t of p.mealTypes) {
+    if (t === "middag") meals.push({ day: d, type: t, ...dinners[(d - 1) % dinners.length] });
+    else meals.push({ day: d, type: t, title: t === "frokost" ? "Egg og bacon" : "Brødskiver", description: "Enkelt.", ingredients: [ing(t === "frokost" ? "Bacon" : "Brød", "1 pk", t === "frokost" ? "kjott" : "brod")] });
+  }
+  return { meals };
+}

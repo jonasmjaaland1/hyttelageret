@@ -35,13 +35,14 @@ const MAPS = {
   extras: {
     from: r => ({
       id: r.id, name: r.name, store: r.store, done: r.done, doneAt: ms(r.done_at),
-      updatedBy: r.updated_by, updatedAt: ms(r.updated_at),
+      updatedBy: r.updated_by, updatedAt: ms(r.updated_at), category: r.category ?? null, note: r.note ?? null,
     }),
-    cols: { id: "id", name: "name", store: "store", done: "done", doneAt: ["done_at", iso] },
+    cols: { id: "id", name: "name", store: "store", done: "done", doneAt: ["done_at", iso], category: "category", note: "note" },
   },
   stores: { from: r => ({ id: r.id, name: r.name, sort: r.sort }), cols: { id: "id", name: "name", sort: "sort" } },
   place_checks: { from: r => ({ place: r.place, at: ms(r.checked_at), by: r.checked_by }), cols: {} },
   profiles: { from: r => ({ id: r.id, name: r.name }), cols: {} },
+  plans: { from: r => ({ id: r.id, data: r.data, updatedAt: ms(r.updated_at), updatedBy: r.updated_by }), cols: {} },
 };
 const TABLES = Object.keys(MAPS);
 
@@ -91,8 +92,11 @@ export async function isMember() {
 const store = createStore();
 export const subscribeData = store.subscribe;
 
+// Tabeller som kommer fra nyere databaseendringer. Mangler de, virker resten av appen likevel.
+const OPTIONAL = new Set(["plans"]);
 async function load(table) {
   const { data, error } = await sb.from(table).select("*");
+  if (error && OPTIONAL.has(table)) { console.warn(`Tabellen ${table} mangler. Kjør siste SQL-endring.`); store.replace(table, []); return; }
   if (error) { store.status("error"); return; }
   store.replace(table, data.map(MAPS[table].from));
   store.status("ok");
@@ -143,6 +147,16 @@ export const items = crud("items");
 export const extras = crud("extras");
 export const stores = crud("stores");
 
+// Menyplanen: én rad med id 'current'.
+export async function savePlan(data) {
+  store.upsertLocal("plans", { id: "current", data });
+  await run("plans", sb.from("plans").upsert({ id: "current", data }));
+}
+export async function clearPlan() {
+  store.removeLocal("plans", "current");
+  await run("plans", sb.from("plans").delete().eq("id", "current"));
+}
+
 // Turstatus: én rad med id 'main'.
 export async function setTrip(patch) {
   store.upsertLocal("trip_state", { id: "main", ...patch, changedAt: Date.now() });
@@ -158,24 +172,32 @@ export async function setName(userId, name) {
   await run("profiles", sb.from("profiles").upsert({ id: userId, name }));
 }
 
-// ---------- Bildesjekk ----------
-export async function analyze(place, known, blobs, signal) {
+// ---------- Serverfunksjoner ----------
+async function postApi(path, body, signal) {
   const { data } = await sb.auth.getSession();
   const token = data.session?.access_token;
   if (!token) throw { code: "not_signed_in" };
-  const images = await Promise.all(blobs.map(toBase64));
   let res;
   try {
-    res = await fetch("/api/analyze", {
+    res = await fetch(path, {
       method: "POST", signal,
       headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-      body: JSON.stringify({ place, known, images }),
+      body: JSON.stringify(body),
     });
   } catch (e) {
     if (e && e.name === "AbortError") throw { code: "cancelled" };
     throw { code: "offline" };
   }
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw { code: body.error || "upstream" };
-  return body;
+  const out = await res.json().catch(() => ({}));
+  if (!res.ok) throw { code: out.error || "upstream" };
+  return out;
+}
+
+export async function analyze(place, known, blobs, signal) {
+  const images = await Promise.all(blobs.map(toBase64));
+  return postApi("/api/analyze", { place, known, images }, signal);
+}
+
+export function planMenu(payload, signal) {
+  return postApi("/api/plan", payload, signal);
 }

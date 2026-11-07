@@ -3,7 +3,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
-import { createClient } from "@supabase/supabase-js";
+import { checkMember, AUTH_STATUS } from "./_auth.js";
 import { z } from "zod";
 
 const PLACES: Record<string, string> = {
@@ -63,34 +63,14 @@ Velg heller "usikker" enn "nei" når du er i tvil. Et feil "nei" fører til at v
 List også varer du ser tydelig som IKKE står i listen over ("new"). Bruk korte norske navn slik folk skriver dem på en handleliste (for eksempel "Kaffe", "Hvetemel", "Leverpostei"), ikke merkenavn. Slå sammen like varer. For hver ny vare: "category", "staple" (true hvis det er en basisvare man vanligvis alltid vil ha på hytta, som kaffe, salt, olje eller dopapir), "level", "count" (antall pakker; 1 hvis du ikke kan telle), og "shelf_days": omtrent hvor mange dager varen holder seg der den står etter at den er kjøpt eller åpnet (for eksempel melk 7, brød 4, smør 60, ketchup 180). Bruk null for varer som holder seg i mange måneder, som tørrvarer, hermetikk, husholdningsartikler og alt i fryseren.`;
 }
 
-async function isMember(token: string): Promise<boolean> {
-  const url = process.env.VITE_SUPABASE_URL;
-  const key = process.env.VITE_SUPABASE_ANON_KEY;
-  if (!url || !key) throw new Error("Supabase-variablene mangler på serveren");
-  const sb = createClient(url, key, {
-    global: { headers: { Authorization: `Bearer ${token}` } },
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const { data: userData, error: userErr } = await sb.auth.getUser(token);
-  if (userErr || !userData.user) return false;
-  const { data, error } = await sb.rpc("is_member");
-  return !error && data === true;
-}
-
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
     return res.status(405).json({ error: "method_not_allowed" });
   }
 
-  const token = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
-  if (!token) return res.status(401).json({ error: "not_signed_in" });
-  try {
-    if (!(await isMember(token))) return res.status(403).json({ error: "not_member" });
-  } catch (e) {
-    console.error("auth check failed", e);
-    return res.status(500).json({ error: "server_config" });
-  }
+  const auth = await checkMember(req);
+  if (auth !== "ok") return res.status(AUTH_STATUS[auth]).json({ error: auth });
 
   const parsed = Body.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "bad_request" });

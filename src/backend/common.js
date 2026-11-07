@@ -1,6 +1,6 @@
 // Felles hjelpere for datalagene: en liten tilstandsbeholder med lokale (optimistiske) endringer.
 export function createStore() {
-  const data = { items: [], extras: [], stores: [], place_checks: [], profiles: [], trip_state: [] };
+  const data = { items: [], extras: [], stores: [], place_checks: [], profiles: [], trip_state: [], plans: [] };
   const listeners = new Set();
   let status = "loading";
   const key = (table, row) => (table === "place_checks" ? row.place : row.id);
