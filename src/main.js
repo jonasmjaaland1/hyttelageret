@@ -386,7 +386,9 @@ let sheetClose = null;
 function openSheet(html, onClose) {
   const old = $("#sheetBody"), fresh = old.cloneNode(false);
   old.replaceWith(fresh); // nytt element, så gamle lyttere forsvinner
-  fresh.innerHTML = `<div class="grab"></div>` + html;
+  fresh.innerHTML = `<div class="sheet-top"><div class="grab"></div><button class="sheet-x" type="button" data-close aria-label="Lukk">${ICON.x}</button></div>` + html;
+  fresh.querySelector("[data-close]").addEventListener("click", closeSheet);
+  $("#sheet").scrollTop = 0;
   $("#sheet").hidden = false; $("#backdrop").hidden = false;
   sheetClose = onClose || null;
   const f = fresh.querySelector("[autofocus]"); if (f) setTimeout(() => f.focus(), 50);
@@ -396,6 +398,38 @@ function closeSheet() {
   const fn = sheetClose; sheetClose = null; if (fn) fn();
 }
 $("#backdrop").addEventListener("click", closeSheet);
+
+// Dra arket ned for å lukke det (når det er scrollet helt til toppen).
+(() => {
+  const sh = $("#sheet");
+  let y0 = 0, dy = 0, t0 = 0, dragging = false;
+  const reset = () => { sh.style.transition = ""; sh.style.transform = ""; };
+  sh.addEventListener("touchstart", e => {
+    dragging = sh.scrollTop <= 0 && e.touches.length === 1;
+    y0 = e.touches[0].clientY; dy = 0; t0 = Date.now();
+    sh.style.transition = "none";
+  }, { passive: true });
+  sh.addEventListener("touchmove", e => {
+    if (!dragging) return;
+    dy = e.touches[0].clientY - y0;
+    if (dy <= 0 || sh.scrollTop > 0) { sh.style.transform = ""; if (dy < 0) dragging = false; return; }
+    sh.style.transform = `translateY(${dy}px)`;
+    if (e.cancelable) e.preventDefault(); // hindrer at siden bak scroller
+  }, { passive: false });
+  sh.addEventListener("touchend", () => {
+    if (!dragging) { reset(); return; }
+    dragging = false;
+    const fast = dy / Math.max(1, Date.now() - t0) > 0.5;
+    sh.style.transition = "transform .18s ease-out";
+    if (dy > 110 || (dy > 40 && fast)) {
+      sh.style.transform = "translateY(100%)";
+      setTimeout(() => { reset(); closeSheet(); }, 170);
+    } else {
+      sh.style.transform = "";
+      setTimeout(reset, 180);
+    }
+  });
+})();
 document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("#sheet").hidden) closeSheet(); });
 
 function segHtml(name, opts, val, legend) {
@@ -463,19 +497,27 @@ function openEdit(id) {
 
 function openStarter() {
   const have = new Set([...S.items.values()].map(i => norm(i.name)));
-  let html = `<h2>Vanlige hyttevarer</h2><p class="lead">Fjern det dere ikke vil ha. Alt legges inn som fast vare med status Nok.</p><div class="starter">`;
+  let html = `<h2>Vanlige hyttevarer</h2><p class="lead">Trykk på det dere vil ha på lageret. Det legges inn som fast vare med status Nok.</p>
+    <button class="linkbtn" type="button" id="st-all">Velg alle</button><div class="starter">`;
   for (const p of PLACES) {
     const left = STARTER[p.id].filter(([n]) => !have.has(norm(n)));
     if (!left.length) continue;
     html += `<h3>${p.name}</h3><div class="grid">` + left.map(([n, c]) =>
-      `<label><input type="checkbox" checked data-name="${esc(n)}" data-place="${p.id}" data-cat="${c}">${esc(n)}</label>`).join("") + `</div>`;
+      `<label><input type="checkbox" data-name="${esc(n)}" data-place="${p.id}" data-cat="${c}">${esc(n)}</label>`).join("") + `</div>`;
   }
   html += `</div><div class="foot"><button class="btn ghost" type="button" id="st-cancel">Avbryt</button><button class="btn primary" type="button" id="st-add">Legg til</button></div>`;
   openSheet(html);
-  const upd = () => { const n = document.querySelectorAll(".starter input:checked").length; $("#st-add").textContent = n ? `Legg til ${n} varer` : "Legg til"; $("#st-add").disabled = !n; };
+  const upd = () => { const n = document.querySelectorAll(".starter input:checked").length; $("#st-add").textContent = n ? `Legg til ${n} vare${n === 1 ? "" : "r"}` : "Velg varer"; $("#st-add").disabled = !n; };
   upd();
   $("#sheetBody").addEventListener("change", upd);
   $("#st-cancel").addEventListener("click", closeSheet);
+  $("#st-all").addEventListener("click", () => {
+    const boxes = [...document.querySelectorAll(".starter input")];
+    const all = boxes.every(b => b.checked);
+    boxes.forEach(b => { b.checked = !all; });
+    $("#st-all").textContent = all ? "Velg alle" : "Fjern alle";
+    upd();
+  });
   $("#st-add").addEventListener("click", async () => {
     const picks = [...document.querySelectorAll(".starter input:checked")].map(i => ({ name: i.dataset.name, place: i.dataset.place, category: i.dataset.cat }));
     closeSheet();
