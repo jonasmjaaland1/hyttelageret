@@ -33,6 +33,11 @@ const SHELF_DEFAULT = { frukt: 7, brod: 4, meieri: 10, palegg: 21, kjott: 3, kry
 const STARTER_SHELF = { "Smør": 60, "Egg": 28, "Brunost": 60, "Syltetøy": 90, "Majones": 60, "Ketchup": 180, "Sennep": 180 };
 const SHELF_OPTIONS = [["", "Automatisk"], ["3", "3 dager"], ["7", "1 uke"], ["14", "2 uker"], ["30", "1 måned"], ["90", "3 måneder"], ["365", "Holder lenge"]];
 const UNKNOWN_RETURN_DAYS = 14;
+// Ukens kundeaviser hos Mattilbud. Rekkefølge: lavpris først.
+const FLYERS = [
+  ["REMA 1000", "rema-1000-no"], ["KIWI", "kiwi-no"], ["Extra", "extra-no"], ["Obs", "obs-no"],
+  ["Bunnpris", "bunnpris-no"], ["Coop Mega", "coop-mega-no"], ["Spar", "spar-no"], ["Meny", "meny-no"], ["Joker", "joker-no"],
+];
 const DAY = 864e5;
 
 // ---------- Tilstand ----------
@@ -294,7 +299,8 @@ function renderListe() {
     return;
   }
   const active = rows.filter(r => !r.done);
-  let html = "";
+  let html = active.length ? `<div class="flyers"><div class="cat" style="margin:0 0 6px">Ukens kundeaviser</div><div class="flyer-row">${FLYERS.map(([n, slug]) =>
+    `<a class="chipbtn" href="https://mattilbud.no/kundeaviser/${slug}" target="_blank" rel="noopener">${n}</a>`).join("")}</div></div>` : "";
   if (!active.length) html += `<div class="empty"><h2>Alt er på plass</h2><p>Ingenting å kjøpe nå. Kjør avreisesjekken når du drar fra hytta.</p></div>`;
   for (const st of stores()) {
     const mine = rows.filter(r => r.store === st.id);

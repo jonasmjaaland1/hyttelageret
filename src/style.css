@@ -294,3 +294,8 @@ li.done .rname span { text-decoration: line-through; color: var(--muted); }
 .exp-soon { color: var(--low); font-weight: 600; }
 .exp-gone { color: var(--empty); font-weight: 600; }
 .banner.go { background: var(--accent-soft); }
+
+/* Kundeaviser */
+.flyer-row { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.flyer-row::-webkit-scrollbar { display: none; }
+.flyer-row .chipbtn { display: inline-flex; align-items: center; text-decoration: none; color: var(--ink); background: var(--surface); white-space: nowrap; }
