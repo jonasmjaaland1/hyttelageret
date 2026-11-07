@@ -339,3 +339,13 @@ li.done .rname span { text-decoration: line-through; color: var(--muted); }
 .sheet-x svg { width: 16px; height: 16px; }
 .sheet { overscroll-behavior: contain; touch-action: pan-y; }
 @media (prefers-reduced-motion: reduce) { .sheet { transition: none !important; } }
+
+/* Lager: forklaring per skap */
+.placehint { font-size: 14px; color: var(--muted); margin: 2px 2px 0; }
+.placehint b { color: var(--ink); font-weight: 600; }
+.howto { font-size: 13px; color: var(--muted); margin: 0 2px 2px; line-height: 1.9; }
+.pill.mini { min-width: 0; height: 22px; padding: 0 8px; font-size: 12px; gap: 4px; vertical-align: middle; }
+.pill.mini::before { width: 6px; height: 6px; }
+.places button { font-size: 13px; padding: 8px 2px; }
+#lagerOut { display: flex; flex-direction: column; gap: 8px; }
+#lagerOut .cat { margin: 8px 2px 0; }

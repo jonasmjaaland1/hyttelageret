@@ -3,10 +3,10 @@ import backend from "./backend/index.js";
 
 // ---------- Faste data ----------
 const PLACES = [
-  { id: "kjol", name: "Kjøleskap", short: "Kjøl", cat: "meieri" },
-  { id: "frys", name: "Fryser", short: "Frys", cat: "frys" },
-  { id: "torr", name: "Tørrskap", short: "Tørr", cat: "torr" },
-  { id: "hus", name: "Husholdning", short: "Hus", cat: "hus" },
+  { id: "kjol", name: "Kjøleskap", short: "Kjøleskap", cat: "meieri", desc: "Meieri, pålegg, grønt og saus" },
+  { id: "frys", name: "Fryser", short: "Fryser", cat: "frys", desc: "Brød, kjøtt, fisk og is" },
+  { id: "torr", name: "Matskap", short: "Matskap", cat: "torr", desc: "Tørrvarer, hermetikk, krydder og drikke" },
+  { id: "hus", name: "Annet", short: "Annet", cat: "hus", desc: "Dopapir, oppvask, tenning, batterier og annet som ikke er mat" },
 ];
 const PLACE = Object.fromEntries(PLACES.map(p => [p.id, p]));
 const STATUS = { ok: "Nok", lite: "Lite", tomt: "Tomt" };
@@ -338,27 +338,39 @@ function renderLager() {
       <button class="btn ghost" type="button" data-act="edit">Legg til selv</button></div></div>`;
     return;
   }
-  let html = "";
+  const bad = list.filter(needs).length;
+  let html = `<div class="placehint"><b>${esc(p.name)}</b> · ${esc(p.desc)}</div>`;
+  if (list.length) html += `<p class="howto">Trykk på statusen for å endre den: <span class="pill ok mini">Nok</span> → <span class="pill lite mini">Lite</span> → <span class="pill tomt mini">Tomt</span>. Lite og Tomt kommer på handlelisten.</p>`;
   if (!list.length) html += `<div class="empty"><p>Ingen varer i ${esc(p.name.toLowerCase())} ennå.</p></div>`;
   else {
-    html += `<ul class="rows">` + list.map(i => {
+    const first = stores()[0].id;
+    const rank = { tomt: 0, lite: 1, ok: 2 };
+    const row = i => {
       const isFrys = i.place === "frys";
       const age = isFrys && monthsOld(i.frozen) >= 6;
       const sub = [];
-      if (i.always) sub.push('<span class="fast">Fast</span>');
       if (isFrys && i.frozen) sub.push(`<span class="${age ? "age" : ""}">Frosset ${esc(monthLabel(i.frozen))}</span>`);
-      else sub.push(esc(storeName(validStore(i.store))));
+      if (validStore(i.store) !== first) sub.push(`Kjøpes på ${esc(storeName(i.store))}`);
       const exp = expiryText(i); if (exp) sub.push(exp);
       return `<li>
         <button class="pill ${i.status}" type="button" data-act="cycle" data-id="${esc(i.id)}" aria-label="${esc(i.name)}: ${STATUS[i.status]}. Trykk for å endre">${STATUS[i.status] || "?"}</button>
-        <button class="rname tap" type="button" data-act="edit" data-id="${esc(i.id)}"><span>${esc(i.name)}</span><small>${sub.join(" · ")}</small></button>
+        <button class="rname tap" type="button" data-act="edit" data-id="${esc(i.id)}"><span>${esc(i.name)}</span>${sub.length ? `<small>${sub.join(" · ")}</small>` : ""}</button>
         ${isFrys ? `<div class="stepper"><button type="button" data-act="qty" data-d="-1" data-id="${esc(i.id)}" aria-label="Én mindre ${esc(i.name)}">−</button><span>${Number(i.qty) || 0}</span><button type="button" data-act="qty" data-d="1" data-id="${esc(i.id)}" aria-label="Én mer ${esc(i.name)}">+</button></div>` : ""}
       </li>`;
-    }).join("") + `</ul>`;
+    };
+    // Det som mangler først, så resten gruppert etter type
+    const missing = list.filter(needs).sort((a, b) => rank[a.status] - rank[b.status] || a.name.localeCompare(b.name, "nb"));
+    if (missing.length) html += `<div class="cat" style="color:var(--empty)">Mangler · står på handlelisten</div><ul class="rows">${missing.map(row).join("")}</ul>`;
+    const rest = list.filter(i => !needs(i));
+    const byCat = {};
+    for (const i of rest) (byCat[i.category || "annet"] = byCat[i.category || "annet"] || []).push(i);
+    for (const c of Object.keys(byCat).sort((a, b) => (CAT_ORDER[a] ?? 99) - (CAT_ORDER[b] ?? 99))) {
+      html += `<div class="cat">${esc(CAT[c] || "Annet")}</div><ul class="rows">${byCat[c].sort((a, b) => a.name.localeCompare(b.name, "nb")).map(row).join("")}</ul>`;
+    }
   }
-  html += `<div style="display:flex;gap:8px;margin-top:12px"><button class="btn primary" style="flex:1" type="button" data-act="edit">Legg til vare</button>
+  html += `<div style="display:flex;gap:8px;margin-top:14px"><button class="btn primary" style="flex:1" type="button" data-act="edit">Legg til vare</button>
     <button class="btn" type="button" data-act="starter">Fra liste</button></div>`;
-  html += `<p class="muted" style="font-size:13px;margin:8px 2px 0">Trykk på Nok, Lite eller Tomt for å endre. Det som er lite eller tomt havner på handlelisten.</p>`;
+  html += `<p class="muted" style="font-size:13px;margin:8px 2px 0">Trykk på navnet for å endre vare, flytte den til et annet skap eller slette den.</p>`;
   out.innerHTML = html;
 }
 
@@ -457,7 +469,7 @@ function openEdit(id) {
         <label class="field">Holder seg<select id="f-shelf">${SHELF_OPTIONS.map(([k, l]) => `<option value="${k}" ${String(v.shelfDays || "") === k ? "selected" : ""}>${l}</option>`).join("")}</select></label>
         <label class="field">Best før<input id="f-exp" type="date" value="${esc(v.expiresOn || "")}"></label>
       </div>
-      <label class="toggle"><input type="checkbox" id="f-fast" ${v.always ? "checked" : ""}><span>Fast vare<small>Skal alltid være på hytta. Bildesjekken setter den til Tomt i stedet for å fjerne den.</small></span></label>
+      <label class="toggle"><input type="checkbox" id="f-fast" ${v.always ? "checked" : ""}><span>Basisvare<small>Noe dere alltid vil ha på hytta, som kaffe og dopapir. Når den er brukt opp, blir den stående som Tomt og kommer på handlelisten. Andre varer fjernes fra lageret når de er brukt opp.</small></span></label>
       <div class="foot">
         ${it ? `<button type="button" class="btn danger" id="f-del">Slett</button>` : `<button type="button" class="btn ghost" id="f-cancel">Avbryt</button>`}
         <button type="submit" class="btn primary">${it ? "Lagre" : "Legg til"}</button>
@@ -497,7 +509,7 @@ function openEdit(id) {
 
 function openStarter() {
   const have = new Set([...S.items.values()].map(i => norm(i.name)));
-  let html = `<h2>Vanlige hyttevarer</h2><p class="lead">Trykk på det dere vil ha på lageret. Det legges inn som fast vare med status Nok.</p>
+  let html = `<h2>Vanlige hyttevarer</h2><p class="lead">Trykk på det dere vil ha på lageret. Det legges inn som basisvare med status Nok.</p>
     <button class="linkbtn" type="button" id="st-all">Velg alle</button><div class="starter">`;
   for (const p of PLACES) {
     const left = STARTER[p.id].filter(([n]) => !have.has(norm(n)));
@@ -939,7 +951,9 @@ function buildProposals(place, res) {
     existing.add(norm(name));
     const lvl = STATUS[n.level] ? n.level : "ok";
     const cat = CAT[n.category] ? n.category : PLACE[place].cat;
-    out.push({ group: "new", type: "add", on: true, name, title: name, category: cat,
+    // Mat som dukker opp på bilder av «Annet»-skapet, legges i matskapet.
+    const target = place === "hus" && cat !== "hus" && cat !== "annet" ? (cat === "frys" ? "frys" : "torr") : place;
+    out.push({ group: "new", type: "add", on: true, name, title: name, category: cat, target,
       always: !!n.staple, status: lvl, qty: Math.max(1, parseInt(n.count, 10) || 1),
       shelfDays: Number.isInteger(n.shelf_days) && n.shelf_days > 0 && n.shelf_days < 3650 ? n.shelf_days : null,
       sub: `${CAT[cat]}${lvl !== "ok" ? " · " + STATUS[lvl] : ""}` });
@@ -955,7 +969,7 @@ function renderReview() {
     return `<div class="subhead">${label}</div><ul class="props">${list.map(([x, i]) => `<li>
       <input type="checkbox" id="pr-${i}" data-i="${i}" ${x.on ? "checked" : ""}>
       <label class="main" for="pr-${i}"><span>${esc(x.title)}</span><small>${esc(x.sub)}</small></label>
-      ${x.type === "add" ? `<label class="fastsel"><input type="checkbox" data-fast="${i}" ${x.always ? "checked" : ""}>Fast</label>` : ""}
+      ${x.type === "add" ? `<label class="fastsel"><input type="checkbox" data-fast="${i}" ${x.always ? "checked" : ""}>Basisvare</label>` : ""}
     </li>`).join("")}</ul>`;
   };
   const none = !props.length;
@@ -983,7 +997,7 @@ function renderReview() {
         ...(x.to === "ok" ? { stockedAt: Date.now(), expiresOn: null } : {}),
       });
       if (x.type === "remove") return itemDelete(x.id);
-      return itemAdd({ name: x.name, place, category: x.category, store: stores()[0].id, always: x.always, status: x.status, qty: x.qty, shelfDays: x.shelfDays });
+      return itemAdd({ name: x.name, place: x.target || place, category: x.category, store: stores()[0].id, always: x.always, status: x.status, qty: x.qty, shelfDays: x.shelfDays });
     });
     jobs.push(save(() => backend.markChecked(place, S.uid)));
     const res = await Promise.all(jobs);

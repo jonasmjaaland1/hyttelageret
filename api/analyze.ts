@@ -9,8 +9,8 @@ import { z } from "zod";
 const PLACES: Record<string, string> = {
   kjol: "kjøleskapet",
   frys: "fryseren",
-  torr: "tørrskapet",
-  hus: "husholdningsskapet",
+  torr: "matskapet (tørrvarer, hermetikk, krydder, drikke)",
+  hus: "skapet for husholdningsartikler (dopapir, oppvask, tenning og annet som ikke er mat)",
 };
 const CATEGORIES = [
   "frukt", "brod", "meieri", "palegg", "kjott", "frys", "torr",
