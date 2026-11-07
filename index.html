@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="nb">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Hyttelageret</title>
+  <meta name="description" content="Matlager og handleliste for hytta">
+  <meta name="theme-color" content="#F1F4F2" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0E1411" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Hytta">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icon-180.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@500;600;700&family=Instrument+Sans:wght@400;500;600&display=swap">
+</head>
+<body>
+  <!-- Innlogging -->
+  <section class="auth" id="auth" hidden>
+    <div class="wrap">
+      <h1>
+        <svg width="34" height="34" viewBox="0 0 26 26" aria-hidden="true"><path d="M3 13 13 4l10 9" fill="none" stroke="var(--accent)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 11v11h14V11" fill="none" stroke="var(--accent)" stroke-width="2.4" stroke-linejoin="round"/><rect x="11" y="15" width="4" height="7" fill="var(--empty)"/></svg>
+        Hyttelageret
+      </h1>
+      <div id="authBody"></div>
+    </div>
+  </section>
+
+  <!-- Appen -->
+  <div id="app" hidden>
+    <header class="top">
+      <div class="wrap">
+        <div class="brand">
+          <h1>
+            <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true"><path d="M3 13 13 4l10 9" fill="none" stroke="var(--accent)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 11v11h14V11" fill="none" stroke="var(--accent)" stroke-width="2.4" stroke-linejoin="round"/><rect x="11" y="15" width="4" height="7" fill="var(--empty)"/></svg>
+            Hyttelageret
+          </h1>
+          <p class="activity" id="activity">Henter lageret …</p>
+        </div>
+        <button class="me" id="meBtn" type="button" aria-label="Innstillinger">Meg</button>
+      </div>
+    </header>
+
+    <main>
+      <div class="wrap">
+        <div id="banner" hidden></div>
+
+        <section class="view" id="view-liste" hidden>
+          <form class="addbar" id="addForm" autocomplete="off">
+            <label class="sr" for="addName">Legg til på handlelisten</label>
+            <input id="addName" placeholder="Legg til, f.eks. tacoskjell" enterkeyhint="done">
+            <button type="button" class="storepick" id="addStore"></button>
+            <button type="submit" class="btn primary" aria-label="Legg til">+</button>
+          </form>
+          <div id="listOut"></div>
+        </section>
+
+        <section class="view" id="view-lager" hidden>
+          <div class="places" id="places"></div>
+          <div id="lagerOut"></div>
+        </section>
+
+        <section class="view" id="view-sjekk" hidden>
+          <div>
+            <h2 style="font-size:22px;margin-bottom:10px">Avreisesjekk</h2>
+            <ol class="steps">
+              <li>Åpne skapet og ta ett til tre bilder.</li>
+              <li>Godkjenn eller fjern forslagene.</li>
+              <li>Handlelisten oppdaterer seg selv.</li>
+            </ol>
+          </div>
+          <div id="sjekkOut"></div>
+        </section>
+      </div>
+    </main>
+
+    <nav class="tabs" aria-label="Hovedmeny">
+      <div class="inner">
+        <button class="tab" data-tab="liste" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 7h1M9 7h10M5 12h1M9 12h10M5 17h1M9 17h10"/></svg>
+          Handleliste<span class="count" id="listCount" hidden></span>
+        </button>
+        <button class="tab" data-tab="lager" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 10h16M8 6.5h2M8 13.5h2"/></svg>
+          Lager
+        </button>
+        <button class="tab" data-tab="sjekk" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
+          Avreisesjekk
+        </button>
+      </div>
+    </nav>
+  </div>
+
+  <input type="file" id="fileIn" accept="image/*" multiple hidden>
+  <div class="backdrop" id="backdrop" hidden></div>
+  <div class="sheet" id="sheet" role="dialog" aria-modal="true" hidden><div class="wrap" id="sheetBody"></div></div>
+  <div class="toast" id="toast" role="status" hidden></div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

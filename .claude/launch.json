@@ -1,0 +1,7 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "hytta-mock", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev:mock", "--", "--port", "5179", "--strictPort"], "port": 5179 },
+    { "name": "hytta", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev", "--", "--port", "5178", "--strictPort"], "port": 5178 }
+  ]
+}

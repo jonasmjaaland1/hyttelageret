@@ -1,0 +1,23 @@
+{
+  "name": "hyttelageret",
+  "scripts": {
+    "dev": "vite",
+    "dev:mock": "vite --mode mock",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.6.0",
+    "@supabase/supabase-js": "^2.119.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@vercel/node": "^30.0.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.6"
+  }
+}
